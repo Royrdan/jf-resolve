@@ -1,5 +1,5 @@
 name: "JF-Resolve"
-version: "2.0.1"
+version: "2.0.2"
 slug: "jf-resolve"
 description: "Jellyfin Media Resolver with Real-Debrid/AllDebrid integration"
 url: "https://github.com/royrdan/jfresolve"
@@ -15,5 +15,7 @@ ports:
 map:
   - config:rw
   - share:rw
-options: {}
-schema: {}
+options:
+  jf_resolve_api_key: ""
+schema:
+  jf_resolve_api_key: str
