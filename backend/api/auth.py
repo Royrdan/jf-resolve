@@ -1,7 +1,10 @@
 """Authentication API routes"""
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
@@ -21,6 +24,15 @@ async def get_current_user(
 ) -> User:
     """Get current authenticated user from JWT token"""
     token = credentials.credentials
+
+    # Check for static API key
+    static_api_key = os.getenv("JF_RESOLVE_API_KEY")
+    if static_api_key and token == static_api_key:
+        # Return first user as admin context
+        result = await db.execute(select(User).limit(1))
+        user = result.scalar_one_or_none()
+        if user:
+            return user
 
     username = AuthService.verify_token(token)
     if username is None:
