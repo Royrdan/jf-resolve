@@ -26,7 +26,7 @@ ln -sf /data/.env /app/.env
 # Export env vars from options
 CONFIG_PATH=/data/options.json
 if [ -f "$CONFIG_PATH" ]; then
-    API_KEY=$(jq --raw-output '.jf_resolve_api_key // empty' $CONFIG_PATH)
+    API_KEY=$(python3 -c "import json; print(json.load(open('$CONFIG_PATH')).get('jf_resolve_api_key') or '')")
     if [ ! -z "$API_KEY" ]; then
         export JF_RESOLVE_API_KEY="$API_KEY"
         echo "JF_RESOLVE_API_KEY set from options"
