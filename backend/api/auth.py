@@ -1,8 +1,9 @@
 """Authentication API routes"""
 
 import os
+from ipaddress import ip_address
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,39 +20,51 @@ security_required = HTTPBearer()
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security_required),
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Get current authenticated user from JWT token"""
-    token = credentials.credentials
+    """Get current authenticated user from JWT token, API key, or internal IP"""
+    # Check for credentials (Token or API Key)
+    if credentials:
+        token = credentials.credentials
 
-    # Check for static API key
-    static_api_key = os.getenv("JF_RESOLVE_API_KEY")
-    if static_api_key and token == static_api_key:
-        # Return first user as admin context
-        result = await db.execute(select(User).limit(1))
-        user = result.scalar_one_or_none()
-        if user:
-            return user
+        # Check for static API key
+        static_api_key = os.getenv("JF_RESOLVE_API_KEY")
+        if static_api_key and token == static_api_key:
+            # Return first user as admin context
+            result = await db.execute(select(User).limit(1))
+            user = result.scalar_one_or_none()
+            if user:
+                return user
 
-    username = AuthService.verify_token(token)
-    if username is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        username = AuthService.verify_token(token)
+        if username:
+            auth_service = AuthService(db)
+            user = await auth_service.get_user_by_username(username)
+            if user and user.is_active:
+                return user
 
-    auth_service = AuthService(db)
-    user = await auth_service.get_user_by_username(username)
-    if user is None or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or inactive",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    # Check for local/internal IP whitelist
+    try:
+        client_host = request.client.host
+        # Handle cases where host might be None
+        if client_host:
+            ip = ip_address(client_host)
+            if ip.is_private or ip.is_loopback:
+                # Return first user as admin context
+                result = await db.execute(select(User).limit(1))
+                user = result.scalar_one_or_none()
+                if user:
+                    return user
+    except ValueError:
+        pass  # Invalid IP address, ignore
 
-    return user
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid authentication credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 async def get_current_user_optional(

@@ -7,7 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..api.auth import get_current_user
 from ..database import get_db
+from ..models.user import User
 from ..services.failover_manager import FailoverManager
 from ..services.library_service import LibraryService
 from ..services.log_service import log_service
@@ -28,6 +30,7 @@ async def resolve_stream(
     index: int = Query(0),
     imdb_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Resolve stream URL with failover
