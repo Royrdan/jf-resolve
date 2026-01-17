@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="JF-Resolve 2.0",
     description="TMDB to Jellyfin streaming integration via Stremio manifests",
-    version="2.0.0",
+    version="2.0.1",
     lifespan=lifespan,
     docs_url=None,  # Disable default docs
     redoc_url=None,  # Disable default redoc
@@ -155,7 +155,7 @@ async def api_root():
     """API root"""
     return {
         "name": "JF-Resolve 2.0 API",
-        "version": "2.0.0",
+        "version": "2.0.1",
         "docs": "/docs",
         "openapi": "/openapi.json",
     }

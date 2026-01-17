@@ -20,7 +20,7 @@ from ..services.tmdb_service import TMDBService
 router = APIRouter(prefix="/api/stream", tags=["stream"])
 
 
-@router.get("/resolve/{media_type}/{tmdb_id}")
+@router.api_route("/resolve/{media_type}/{tmdb_id}", methods=["GET", "HEAD"])
 async def resolve_stream(
     media_type: str,
     tmdb_id: int,
