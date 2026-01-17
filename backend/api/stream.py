@@ -1,5 +1,6 @@
 """Stream resolution API routes"""
 
+import httpx
 from datetime import datetime
 from typing import Optional
 
@@ -148,6 +149,33 @@ async def resolve_stream(
         log_service.stream(
             f"Resolved {state_key} quality={quality} index={use_index} attempt={state.attempt_count} → {stream_url[:100]}..."
         )
+
+        # Resolve redirect chain to get final URL
+        try:
+            log_service.info(f"Resolving redirect chain for: {stream_url}")
+            async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
+                # Try HEAD first
+                try:
+                    log_service.info("Attempting HEAD request...")
+                    response = await client.head(stream_url, timeout=15.0)
+                    log_service.info(f"HEAD response: {response.status_code} {response.url}")
+
+                    if response.status_code == 405:
+                        raise Exception("Method Not Allowed (405)")
+
+                    stream_url = str(response.url)
+                except Exception as e:
+                    log_service.info(f"HEAD failed ({str(e)}), switching to GET stream...")
+                    # Fallback to GET stream
+                    async with client.stream("GET", stream_url, timeout=15.0) as response:
+                        stream_url = str(response.url)
+                        log_service.info(f"GET response URL: {stream_url}")
+
+            log_service.stream(f"Final resolved URL: {stream_url[:100]}...")
+
+        except Exception as e:
+            log_service.error(f"Failed to resolve redirects: {e}")
+            # Fallback to original URL if resolution fails
 
         return RedirectResponse(url=stream_url, status_code=302)
 
