@@ -1,6 +1,7 @@
 """Logging service"""
 
 import logging
+import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import List
@@ -44,6 +45,12 @@ class LogService:
         handler.setFormatter(formatter)
 
         logger.addHandler(handler)
+
+        # Console handler
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
         return logger
 
     def error(self, message: str, **kwargs):
