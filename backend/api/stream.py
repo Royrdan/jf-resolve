@@ -1,6 +1,7 @@
 """Stream resolution API routes"""
 
 import httpx
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -19,6 +20,10 @@ from ..services.stremio_service import StremioService
 from ..services.tmdb_service import TMDBService
 
 router = APIRouter(prefix="/api/stream", tags=["stream"])
+
+# Cache for resolved URLs: {key: (timestamp, url)}
+RESOLVE_CACHE = {}
+RESOLVE_CACHE_TTL = 3600  # 60 minutes
 
 
 @router.api_route("/resolve/{media_type}/{tmdb_id}", methods=["GET", "HEAD"])
@@ -41,6 +46,14 @@ async def resolve_stream(
         f"Stream resolve request: {media_type}/{tmdb_id} quality={quality} "
         f"index={index} imdb_id={imdb_id} season={season} episode={episode}"
     )
+
+    # Check cache for resolved URL
+    cache_key = f"{media_type}:{tmdb_id}:{season}:{episode}:{quality}:{index}"
+    if cache_key in RESOLVE_CACHE:
+        ts, cached_url = RESOLVE_CACHE[cache_key]
+        if time.time() - ts < RESOLVE_CACHE_TTL:
+            log_service.info(f"Using cached resolved URL for {cache_key}")
+            return RedirectResponse(url=cached_url, status_code=302)
 
     if media_type not in ["movie", "tv"]:
         raise HTTPException(status_code=400, detail="Invalid media type")
@@ -120,6 +133,16 @@ async def resolve_stream(
                 status_code=404, detail="No streams available from addon"
             )
 
+        # Stop Index Increment Loop
+        if use_index >= len(streams) and len(streams) > 0:
+            log_service.info(
+                f"Index {use_index} out of range (max {len(streams)-1}). Resetting to 0."
+            )
+            use_index = 0
+            # Update state to reset
+            state.current_index = 0
+            await failover.update_state(state)
+
         fallback_enabled = await settings.get("quality_fallback_enabled", True)
         fallback_order = await settings.get(
             "quality_fallback_order", ["1080p", "720p", "4k", "480p"]
@@ -153,25 +176,47 @@ async def resolve_stream(
         # Resolve redirect chain to get final URL
         try:
             log_service.info(f"Resolving redirect chain for: {stream_url}")
+
+            # Check for known blocking domains to skip HEAD
+            skip_head = False
+            if "torrentio" in stream_url or "real-debrid" in stream_url:
+                skip_head = True
+                log_service.info(
+                    f"Skipping HEAD for known blocking domain: {stream_url}"
+                )
+
             async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
                 # Try HEAD first
-                try:
-                    log_service.info("Attempting HEAD request...")
-                    response = await client.head(stream_url, timeout=15.0)
-                    log_service.info(f"HEAD response: {response.status_code} {response.url}")
+                if not skip_head:
+                    try:
+                        log_service.info("Attempting HEAD request...")
+                        response = await client.head(stream_url, timeout=15.0)
+                        log_service.info(
+                            f"HEAD response: {response.status_code} {response.url}"
+                        )
 
-                    if response.status_code == 405:
-                        raise Exception("Method Not Allowed (405)")
+                        if response.status_code == 405:
+                            raise Exception("Method Not Allowed (405)")
 
-                    stream_url = str(response.url)
-                except Exception as e:
-                    log_service.info(f"HEAD failed ({str(e)}), switching to GET stream...")
-                    # Fallback to GET stream
-                    async with client.stream("GET", stream_url, timeout=15.0) as response:
+                        stream_url = str(response.url)
+                    except Exception as e:
+                        log_service.info(
+                            f"HEAD failed ({str(e)}), switching to GET stream..."
+                        )
+                        skip_head = True  # Force fallback
+
+                # Fallback to GET stream
+                if skip_head:
+                    async with client.stream(
+                        "GET", stream_url, timeout=15.0
+                    ) as response:
                         stream_url = str(response.url)
                         log_service.info(f"GET response URL: {stream_url}")
 
             log_service.stream(f"Final resolved URL: {stream_url[:100]}...")
+
+            # Cache the result
+            RESOLVE_CACHE[cache_key] = (time.time(), stream_url)
 
         except Exception as e:
             log_service.error(f"Failed to resolve redirects: {e}")

@@ -17,6 +17,10 @@ class StremioService:
     _last_request_time = 0
     _request_delay = 0.5  # 500ms
 
+    # Cache: {key: (timestamp, streams)}
+    _cache = {}
+    _cache_ttl = 1800  # 30 minutes
+
     def __init__(self, manifest_url: str):
         self.manifest_url = self.normalize_url(manifest_url)
 
@@ -128,6 +132,14 @@ class StremioService:
         """
         Get streams for a movie
         """
+        # Check cache
+        cache_key = f"movie:{imdb_id}"
+        if cache_key in self._cache:
+            ts, cached_streams = self._cache[cache_key]
+            if time.time() - ts < self._cache_ttl:
+                log_service.info(f"Using cached streams for {cache_key}")
+                return cached_streams
+
         # Rate limiting
         await self._rate_limited_request()
 
@@ -153,6 +165,7 @@ class StremioService:
 
             streams = data.get("streams", [])
             log_service.info(f"Received {len(streams)} streams for movie {imdb_id}")
+            self._cache[cache_key] = (time.time(), streams)
             return streams
 
         except requests.RequestException as e:
@@ -171,6 +184,14 @@ class StremioService:
         Get streams for a TV episode
         GET {manifest_url}/stream/series/{imdb_id}:{season}:{episode}.json
         """
+        # Check cache
+        cache_key = f"series:{imdb_id}:{season}:{episode}"
+        if cache_key in self._cache:
+            ts, cached_streams = self._cache[cache_key]
+            if time.time() - ts < self._cache_ttl:
+                log_service.info(f"Using cached streams for {cache_key}")
+                return cached_streams
+
         # Rate limiting
         await self._rate_limited_request()
 
@@ -202,6 +223,7 @@ class StremioService:
             log_service.info(
                 f"Received {len(streams)} streams for episode {imdb_id}:{season}:{episode}"
             )
+            self._cache[cache_key] = (time.time(), streams)
             return streams
 
         except requests.RequestException as e:
