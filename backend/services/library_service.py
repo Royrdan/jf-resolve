@@ -305,18 +305,24 @@ class LibraryService:
                 episode_num = episode.get("episode_number", 0)
                 episode_title = episode.get("name", f"Episode {episode_num}")
 
-                # Create single STRM file with 'auto' quality
-                clean_title = self._sanitize_filename(item.title)
-                filename = f"{clean_title} ({item.year}) - S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)}.strm"
-                strm_path = season_folder / filename
+                for quality in qualities:
+                    clean_title = self._sanitize_filename(item.title)
+                    if quality == "unknown":
+                        filename = f"{clean_title} ({item.year}) - S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)}.strm"
+                    else:
+                        filename = f"{clean_title} ({item.year}) - S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)} - [{quality}].strm"
 
-                base_url = f"{server_url}/api/stream/resolve/tv/{item.tmdb_id}?season={season_num}&episode={episode_num}&quality=auto&index=0"
-                stream_url = (
-                    f"{base_url}&imdb_id={item.imdb_id}" if item.imdb_id else base_url
-                )
+                    strm_path = season_folder / filename
 
-                await asyncio.to_thread(strm_path.write_text, stream_url)
-                await asyncio.to_thread(strm_path.chmod, 0o644)
+                    base_url = f"{server_url}/api/stream/resolve/tv/{item.tmdb_id}?season={season_num}&episode={episode_num}&quality={quality}&index=0"
+                    stream_url = (
+                        f"{base_url}&imdb_id={item.imdb_id}"
+                        if item.imdb_id
+                        else base_url
+                    )
+
+                    await asyncio.to_thread(strm_path.write_text, stream_url)
+                    await asyncio.to_thread(strm_path.chmod, 0o644)
 
         # Create JF-Resolve marker file in the root folder
         marker_path = folder_path / ".jfresolve"
@@ -473,17 +479,21 @@ class LibraryService:
                     episode_num = episode.get("episode_number", 0)
                     episode_title = episode.get("name", f"Episode {episode_num}")
 
-                    # Create single STRM file with 'auto' quality
-                    clean_title = self._sanitize_filename(item.title)
-                    filename = f"{clean_title} ({item.year}) - S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)}.strm"
-                    strm_path = season_folder / filename
+                    for quality in qualities:
+                        clean_title = self._sanitize_filename(item.title)
+                        if quality == "unknown":
+                            filename = f"{clean_title} ({item.year}) - S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)}.strm"
+                        else:
+                            filename = f"{clean_title} ({item.year}) - S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)} - [{quality}].strm"
 
-                    # Only create if doesn't exist
-                    if not await asyncio.to_thread(strm_path.exists):
-                        stream_url = f"{server_url}/api/stream/resolve/tv/{item.tmdb_id}?season={season_num}&episode={episode_num}&quality=auto&index=0"
-                        await asyncio.to_thread(strm_path.write_text, stream_url)
-                        await asyncio.to_thread(strm_path.chmod, 0o644)
-                        new_episodes += 1
+                        strm_path = season_folder / filename
+
+                        # Only create if doesn't exist
+                        if not await asyncio.to_thread(strm_path.exists):
+                            stream_url = f"{server_url}/api/stream/resolve/tv/{item.tmdb_id}?season={season_num}&episode={episode_num}&quality={quality}&index=0"
+                            await asyncio.to_thread(strm_path.write_text, stream_url)
+                            await asyncio.to_thread(strm_path.chmod, 0o644)
+                            new_episodes += 1
 
             # Update metadata
             item.total_seasons = current_seasons
