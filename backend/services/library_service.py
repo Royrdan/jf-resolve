@@ -441,7 +441,7 @@ class LibraryService:
             "message": f"Successfully deleted {deleted_count} items",
         }
 
-    async def refresh_item(self, item_id: int) -> Dict:
+    async def refresh_item(self, item_id: int, force_regenerate: bool = False) -> Dict:
         """
         Refresh metadata and check for new episodes (TV shows)
         """
@@ -460,6 +460,15 @@ class LibraryService:
             item.backdrop_path = details.get("backdrop_path")
             item.overview = details.get("overview")
             await self.db.commit()
+
+            if force_regenerate:
+                qualities = (
+                    json.loads(item.quality_versions)
+                    if item.quality_versions
+                    else ["1080p"]
+                )
+                await self._create_movie_strms(item, qualities)
+                log_service.info(f"Regenerated STRM files for movie: {item.title}")
 
             return {"new_episodes": 0, "message": "Metadata updated"}
 

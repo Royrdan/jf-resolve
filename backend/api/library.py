@@ -137,6 +137,23 @@ async def purge_library(
         raise HTTPException(status_code=500, detail=f"Failed to purge: {str(e)}")
 
 
+@router.post("/regenerate")
+async def regenerate_library(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Force regenerate STRM files for all library items"""
+    library = await get_library_service(db)
+
+    try:
+        result = await library.regenerate_all()
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to regenerate library: {str(e)}"
+        )
+
+
 @router.post("/refresh/{item_id}")
 async def refresh_item(
     item_id: int,
