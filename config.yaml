@@ -1,5 +1,5 @@
 name: "JF-Resolve"
-version: "2.1.4"
+version: "2.1.5"
 slug: "jf-resolve"
 description: "Jellyfin Media Resolver with Real-Debrid/AllDebrid integration"
 url: "https://github.com/royrdan/jfresolve"
