@@ -1,0 +1,372 @@
+2026-01-12 21:33:44 - jfresolve.info - INFO - Starting background scheduler
+2026-01-12 21:33:44 - jfresolve.info - INFO - Auto-populate is disabled
+2026-01-12 21:33:44 - jfresolve.info - INFO - Series update is disabled
+2026-01-12 21:33:44 - jfresolve.info - INFO - Background scheduler started successfully
+2026-01-12 21:42:54 - jfresolve.info - INFO - Auto-populate scheduled: daily
+2026-01-12 21:42:54 - jfresolve.info - INFO - Series update scheduled: daily
+2026-01-12 21:43:02 - jfresolve.info - INFO - Auto-populate scheduled: daily
+2026-01-12 21:43:02 - jfresolve.info - INFO - Series update scheduled: daily
+2026-01-12 21:43:52 - jfresolve.info - INFO - Auto-populate scheduled: daily
+2026-01-12 21:43:52 - jfresolve.info - INFO - Series update scheduled: daily
+2026-01-12 21:44:31 - jfresolve.info - INFO - Starting auto-populate from sources: ['popular', 'top_rated', 'trending'] (Limit: 5)
+2026-01-12 21:44:32 - jfresolve.info - INFO - Created STRM files for movie: Predator: Badlands with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:44:32 - jfresolve.info - INFO - Added to library: movie:1242898 - Predator: Badlands
+2026-01-12 21:44:32 - jfresolve.info - INFO - Auto-populated movie ID 1242898
+2026-01-12 21:44:33 - jfresolve.info - INFO - Created STRM files for movie: The Tank with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:44:33 - jfresolve.info - INFO - Added to library: movie:1252037 - The Tank
+2026-01-12 21:44:33 - jfresolve.info - INFO - Auto-populated movie ID 1252037
+2026-01-12 21:44:34 - jfresolve.info - INFO - Created STRM files for movie: Avatar: Fire and Ash with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:44:34 - jfresolve.info - INFO - Added to library: movie:83533 - Avatar: Fire and Ash
+2026-01-12 21:44:34 - jfresolve.info - INFO - Auto-populated movie ID 83533
+2026-01-12 21:44:34 - jfresolve.info - INFO - Created STRM files for movie: Icefall with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:44:34 - jfresolve.info - INFO - Added to library: movie:1242501 - Icefall
+2026-01-12 21:44:34 - jfresolve.info - INFO - Auto-populated movie ID 1242501
+2026-01-12 21:44:35 - jfresolve.info - INFO - Created STRM files for movie: Zootopia 2 with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:44:35 - jfresolve.info - INFO - Added to library: movie:1084242 - Zootopia 2
+2026-01-12 21:44:35 - jfresolve.info - INFO - Auto-populated movie ID 1084242
+2026-01-12 21:45:17 - jfresolve.info - INFO - Starting auto-populate from sources: ['popular', 'top_rated', 'trending'] (Limit: 5)
+2026-01-12 21:45:19 - jfresolve.info - INFO - Created STRM files for movie: Trap House with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:45:19 - jfresolve.info - INFO - Added to library: movie:628847 - Trap House
+2026-01-12 21:45:19 - jfresolve.info - INFO - Auto-populated movie ID 628847
+2026-01-12 21:45:19 - jfresolve.info - INFO - Created STRM files for movie: Bāhubali: The Epic with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:45:19 - jfresolve.info - INFO - Added to library: movie:1511417 - Bāhubali: The Epic
+2026-01-12 21:45:19 - jfresolve.info - INFO - Auto-populated movie ID 1511417
+2026-01-12 21:45:20 - jfresolve.info - INFO - Created STRM files for movie: The Housemaid with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:45:20 - jfresolve.info - INFO - Added to library: movie:1368166 - The Housemaid
+2026-01-12 21:45:20 - jfresolve.info - INFO - Auto-populated movie ID 1368166
+2026-01-12 21:45:20 - jfresolve.info - INFO - Created STRM files for movie: Demon Slayer: Kimetsu no Yaiba Infinity Castle with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:45:20 - jfresolve.info - INFO - Added to library: movie:1311031 - Demon Slayer: Kimetsu no Yaiba Infinity Castle
+2026-01-12 21:45:20 - jfresolve.info - INFO - Auto-populated movie ID 1311031
+2026-01-12 21:45:21 - jfresolve.info - INFO - Created STRM files for movie: War of the Worlds with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:45:21 - jfresolve.info - INFO - Added to library: movie:755898 - War of the Worlds
+2026-01-12 21:45:21 - jfresolve.info - INFO - Auto-populated movie ID 755898
+2026-01-12 21:45:27 - jfresolve.info - INFO - Auto-populate scheduled: daily
+2026-01-12 21:45:27 - jfresolve.info - INFO - Series update scheduled: daily
+2026-01-12 21:45:57 - jfresolve.info - INFO - Starting auto-populate from sources: ['popular', 'top_rated', 'trending'] (Limit: 100)
+2026-01-12 21:45:58 - jfresolve.info - INFO - Created STRM files for movie: Five Nights at Freddy's 2 with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:45:58 - jfresolve.info - INFO - Added to library: movie:1228246 - Five Nights at Freddy's 2
+2026-01-12 21:45:58 - jfresolve.info - INFO - Auto-populated movie ID 1228246
+2026-01-12 21:45:58 - jfresolve.info - INFO - Created STRM files for movie: Omniscient Reader: The Prophecy with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:45:58 - jfresolve.info - INFO - Added to library: movie:1131759 - Omniscient Reader: The Prophecy
+2026-01-12 21:45:58 - jfresolve.info - INFO - Auto-populated movie ID 1131759
+2026-01-12 21:45:59 - jfresolve.info - INFO - Created STRM files for movie: People We Meet on Vacation with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:45:59 - jfresolve.info - INFO - Added to library: movie:1034716 - People We Meet on Vacation
+2026-01-12 21:45:59 - jfresolve.info - INFO - Auto-populated movie ID 1034716
+2026-01-12 21:46:00 - jfresolve.info - INFO - Created STRM files for movie: Now You See Me: Now You Don't with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:46:00 - jfresolve.info - INFO - Added to library: movie:425274 - Now You See Me: Now You Don't
+2026-01-12 21:46:00 - jfresolve.info - INFO - Auto-populated movie ID 425274
+2026-01-12 21:46:00 - jfresolve.info - INFO - Created STRM files for movie: Risqué with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:46:00 - jfresolve.info - INFO - Added to library: movie:1512623 - Risqué
+2026-01-12 21:46:00 - jfresolve.info - INFO - Auto-populated movie ID 1512623
+2026-01-12 21:46:01 - jfresolve.info - INFO - Created STRM files for movie: Don't Follow Me with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:46:01 - jfresolve.info - INFO - Added to library: movie:772462 - Don't Follow Me
+2026-01-12 21:46:01 - jfresolve.info - INFO - Auto-populated movie ID 772462
+2026-01-12 21:46:01 - jfresolve.info - INFO - Created STRM files for movie: The Great Flood with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:46:01 - jfresolve.info - INFO - Added to library: movie:982843 - The Great Flood
+2026-01-12 21:46:01 - jfresolve.info - INFO - Auto-populated movie ID 982843
+2026-01-12 21:46:02 - jfresolve.info - INFO - Created STRM files for movie: The Shadow's Edge with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:46:02 - jfresolve.info - INFO - Added to library: movie:1419406 - The Shadow's Edge
+2026-01-12 21:46:02 - jfresolve.info - INFO - Auto-populated movie ID 1419406
+2026-01-12 21:46:02 - jfresolve.info - INFO - Created STRM files for movie: Yadang: The Snitch with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:46:02 - jfresolve.info - INFO - Added to library: movie:1137179 - Yadang: The Snitch
+2026-01-12 21:46:02 - jfresolve.info - INFO - Auto-populated movie ID 1137179
+2026-01-12 21:46:03 - jfresolve.info - INFO - Created STRM files for movie: Nazi Supersoldier with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:46:03 - jfresolve.info - INFO - Added to library: movie:1301122 - Nazi Supersoldier
+2026-01-12 21:46:03 - jfresolve.info - INFO - Auto-populated movie ID 1301122
+2026-01-12 21:46:05 - jfresolve.info - INFO - Created STRM files for TV show: Stranger Things (5 seasons)
+2026-01-12 21:46:05 - jfresolve.info - INFO - Added to library: tv:66732 - Stranger Things
+2026-01-12 21:46:05 - jfresolve.info - INFO - Auto-populated tv ID 66732
+2026-01-12 21:46:10 - jfresolve.info - INFO - Created STRM files for TV show: The Rookie (8 seasons)
+2026-01-12 21:46:10 - jfresolve.info - INFO - Added to library: tv:79744 - The Rookie
+2026-01-12 21:46:10 - jfresolve.info - INFO - Auto-populated tv ID 79744
+2026-01-12 21:46:23 - jfresolve.info - INFO - Created STRM files for TV show: Law & Order: Special Victims Unit (27 seasons)
+2026-01-12 21:46:23 - jfresolve.info - INFO - Added to library: tv:2734 - Law & Order: Special Victims Unit
+2026-01-12 21:46:23 - jfresolve.info - INFO - Auto-populated tv ID 2734
+2026-01-12 21:46:31 - jfresolve.info - INFO - Created STRM files for TV show: Supernatural (15 seasons)
+2026-01-12 21:46:31 - jfresolve.info - INFO - Added to library: tv:1622 - Supernatural
+2026-01-12 21:46:31 - jfresolve.info - INFO - Auto-populated tv ID 1622
+2026-01-12 21:46:42 - jfresolve.info - INFO - Created STRM files for TV show: Grey's Anatomy (22 seasons)
+2026-01-12 21:46:42 - jfresolve.info - INFO - Added to library: tv:1416 - Grey's Anatomy
+2026-01-12 21:46:42 - jfresolve.info - INFO - Auto-populated tv ID 1416
+2026-01-12 21:46:59 - jfresolve.info - INFO - Created STRM files for TV show: The Simpsons (37 seasons)
+2026-01-12 21:46:59 - jfresolve.info - INFO - Added to library: tv:456 - The Simpsons
+2026-01-12 21:46:59 - jfresolve.info - INFO - Auto-populated tv ID 456
+2026-01-12 21:47:29 - jfresolve.info - INFO - Created STRM files for TV show: Watch What Happens Live with Andy Cohen (23 seasons)
+2026-01-12 21:47:29 - jfresolve.info - INFO - Added to library: tv:22980 - Watch What Happens Live with Andy Cohen
+2026-01-12 21:47:29 - jfresolve.info - INFO - Auto-populated tv ID 22980
+2026-01-12 21:47:41 - jfresolve.info - INFO - Created STRM files for TV show: NCIS (23 seasons)
+2026-01-12 21:47:41 - jfresolve.info - INFO - Added to library: tv:4614 - NCIS
+2026-01-12 21:47:41 - jfresolve.info - INFO - Auto-populated tv ID 4614
+2026-01-12 21:47:44 - jfresolve.info - INFO - Created STRM files for TV show: Game of Thrones (8 seasons)
+2026-01-12 21:47:44 - jfresolve.info - INFO - Added to library: tv:1399 - Game of Thrones
+2026-01-12 21:47:44 - jfresolve.info - INFO - Auto-populated tv ID 1399
+2026-01-12 21:47:48 - jfresolve.info - INFO - Created STRM files for TV show: The Good Doctor (7 seasons)
+2026-01-12 21:47:48 - jfresolve.info - INFO - Added to library: tv:71712 - The Good Doctor
+2026-01-12 21:47:48 - jfresolve.info - INFO - Auto-populated tv ID 71712
+2026-01-12 21:48:00 - jfresolve.info - INFO - Created STRM files for TV show: Law & Order (25 seasons)
+2026-01-12 21:48:00 - jfresolve.info - INFO - Added to library: tv:549 - Law & Order
+2026-01-12 21:48:00 - jfresolve.info - INFO - Auto-populated tv ID 549
+2026-01-12 21:48:01 - jfresolve.info - INFO - Created STRM files for TV show: Fallout (2 seasons)
+2026-01-12 21:48:01 - jfresolve.info - INFO - Added to library: tv:106379 - Fallout
+2026-01-12 21:48:01 - jfresolve.info - INFO - Auto-populated tv ID 106379
+2026-01-12 21:48:05 - jfresolve.info - INFO - Created STRM files for TV show: House (8 seasons)
+2026-01-12 21:48:05 - jfresolve.info - INFO - Added to library: tv:1408 - House
+2026-01-12 21:48:05 - jfresolve.info - INFO - Auto-populated tv ID 1408
+2026-01-12 21:48:10 - jfresolve.info - INFO - Created STRM files for TV show: Shameless (11 seasons)
+2026-01-12 21:48:10 - jfresolve.info - INFO - Added to library: tv:34307 - Shameless
+2026-01-12 21:48:10 - jfresolve.info - INFO - Auto-populated tv ID 34307
+2026-01-12 21:48:18 - jfresolve.info - INFO - Created STRM files for TV show: The Return of Superman (14 seasons)
+2026-01-12 21:48:18 - jfresolve.info - INFO - Added to library: tv:64356 - The Return of Superman
+2026-01-12 21:48:18 - jfresolve.info - INFO - Auto-populated tv ID 64356
+2026-01-12 21:48:27 - jfresolve.info - INFO - Created STRM files for TV show: Midsomer Murders (25 seasons)
+2026-01-12 21:48:27 - jfresolve.info - INFO - Added to library: tv:764 - Midsomer Murders
+2026-01-12 21:48:27 - jfresolve.info - INFO - Auto-populated tv ID 764
+2026-01-12 21:48:30 - jfresolve.info - INFO - Created STRM files for TV show: Dexter (8 seasons)
+2026-01-12 21:48:30 - jfresolve.info - INFO - Added to library: tv:1405 - Dexter
+2026-01-12 21:48:30 - jfresolve.info - INFO - Auto-populated tv ID 1405
+2026-01-12 21:48:34 - jfresolve.info - INFO - Created STRM files for TV show: Homeland (8 seasons)
+2026-01-12 21:48:34 - jfresolve.info - INFO - Added to library: tv:1407 - Homeland
+2026-01-12 21:48:34 - jfresolve.info - INFO - Auto-populated tv ID 1407
+2026-01-12 21:48:35 - jfresolve.info - INFO - Created STRM files for TV show: Spartacus: House of Ashur (1 seasons)
+2026-01-12 21:48:35 - jfresolve.info - INFO - Added to library: tv:240459 - Spartacus: House of Ashur
+2026-01-12 21:48:35 - jfresolve.info - INFO - Auto-populated tv ID 240459
+2026-01-12 21:48:36 - jfresolve.info - INFO - Created STRM files for movie: The Shawshank Redemption with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:36 - jfresolve.info - INFO - Added to library: movie:278 - The Shawshank Redemption
+2026-01-12 21:48:36 - jfresolve.info - INFO - Auto-populated movie ID 278
+2026-01-12 21:48:36 - jfresolve.info - INFO - Created STRM files for movie: The Godfather with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:36 - jfresolve.info - INFO - Added to library: movie:238 - The Godfather
+2026-01-12 21:48:36 - jfresolve.info - INFO - Auto-populated movie ID 238
+2026-01-12 21:48:37 - jfresolve.info - INFO - Created STRM files for movie: The Godfather Part II with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:37 - jfresolve.info - INFO - Added to library: movie:240 - The Godfather Part II
+2026-01-12 21:48:37 - jfresolve.info - INFO - Auto-populated movie ID 240
+2026-01-12 21:48:38 - jfresolve.info - INFO - Created STRM files for movie: Schindler's List with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:38 - jfresolve.info - INFO - Added to library: movie:424 - Schindler's List
+2026-01-12 21:48:38 - jfresolve.info - INFO - Auto-populated movie ID 424
+2026-01-12 21:48:38 - jfresolve.info - INFO - Created STRM files for movie: 12 Angry Men with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:38 - jfresolve.info - INFO - Added to library: movie:389 - 12 Angry Men
+2026-01-12 21:48:38 - jfresolve.info - INFO - Auto-populated movie ID 389
+2026-01-12 21:48:39 - jfresolve.info - INFO - Created STRM files for movie: Spirited Away with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:39 - jfresolve.info - INFO - Added to library: movie:129 - Spirited Away
+2026-01-12 21:48:39 - jfresolve.info - INFO - Auto-populated movie ID 129
+2026-01-12 21:48:39 - jfresolve.info - INFO - Created STRM files for movie: The Dark Knight with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:39 - jfresolve.info - INFO - Added to library: movie:155 - The Dark Knight
+2026-01-12 21:48:39 - jfresolve.info - INFO - Auto-populated movie ID 155
+2026-01-12 21:48:40 - jfresolve.info - INFO - Created STRM files for movie: Dilwale Dulhania Le Jayenge with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:40 - jfresolve.info - INFO - Added to library: movie:19404 - Dilwale Dulhania Le Jayenge
+2026-01-12 21:48:40 - jfresolve.info - INFO - Auto-populated movie ID 19404
+2026-01-12 21:48:40 - jfresolve.info - INFO - Created STRM files for movie: The Green Mile with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:41 - jfresolve.info - INFO - Added to library: movie:497 - The Green Mile
+2026-01-12 21:48:41 - jfresolve.info - INFO - Auto-populated movie ID 497
+2026-01-12 21:48:41 - jfresolve.info - INFO - Created STRM files for movie: Parasite with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:41 - jfresolve.info - INFO - Added to library: movie:496243 - Parasite
+2026-01-12 21:48:41 - jfresolve.info - INFO - Auto-populated movie ID 496243
+2026-01-12 21:48:42 - jfresolve.info - INFO - Created STRM files for movie: The Lord of the Rings: The Return of the King with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:42 - jfresolve.info - INFO - Added to library: movie:122 - The Lord of the Rings: The Return of the King
+2026-01-12 21:48:42 - jfresolve.info - INFO - Auto-populated movie ID 122
+2026-01-12 21:48:42 - jfresolve.info - INFO - Created STRM files for movie: Pulp Fiction with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:42 - jfresolve.info - INFO - Added to library: movie:680 - Pulp Fiction
+2026-01-12 21:48:42 - jfresolve.info - INFO - Auto-populated movie ID 680
+2026-01-12 21:48:43 - jfresolve.info - INFO - Created STRM files for movie: Your Name. with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:43 - jfresolve.info - INFO - Added to library: movie:372058 - Your Name.
+2026-01-12 21:48:43 - jfresolve.info - INFO - Auto-populated movie ID 372058
+2026-01-12 21:48:43 - jfresolve.info - INFO - Created STRM files for movie: The Good, the Bad and the Ugly with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:43 - jfresolve.info - INFO - Added to library: movie:429 - The Good, the Bad and the Ugly
+2026-01-12 21:48:43 - jfresolve.info - INFO - Auto-populated movie ID 429
+2026-01-12 21:48:44 - jfresolve.info - INFO - Created STRM files for movie: Interstellar with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:44 - jfresolve.info - INFO - Added to library: movie:157336 - Interstellar
+2026-01-12 21:48:44 - jfresolve.info - INFO - Auto-populated movie ID 157336
+2026-01-12 21:48:45 - jfresolve.info - INFO - Created STRM files for movie: Forrest Gump with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:45 - jfresolve.info - INFO - Added to library: movie:13 - Forrest Gump
+2026-01-12 21:48:45 - jfresolve.info - INFO - Auto-populated movie ID 13
+2026-01-12 21:48:45 - jfresolve.info - INFO - Created STRM files for movie: Seven Samurai with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:45 - jfresolve.info - INFO - Added to library: movie:346 - Seven Samurai
+2026-01-12 21:48:45 - jfresolve.info - INFO - Auto-populated movie ID 346
+2026-01-12 21:48:46 - jfresolve.info - INFO - Created STRM files for movie: GoodFellas with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:46 - jfresolve.info - INFO - Added to library: movie:769 - GoodFellas
+2026-01-12 21:48:46 - jfresolve.info - INFO - Auto-populated movie ID 769
+2026-01-12 21:48:46 - jfresolve.info - INFO - Created STRM files for movie: Grave of the Fireflies with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:46 - jfresolve.info - INFO - Added to library: movie:12477 - Grave of the Fireflies
+2026-01-12 21:48:46 - jfresolve.info - INFO - Auto-populated movie ID 12477
+2026-01-12 21:48:47 - jfresolve.info - INFO - Created STRM files for movie: Life Is Beautiful with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:48:47 - jfresolve.info - INFO - Added to library: movie:637 - Life Is Beautiful
+2026-01-12 21:48:47 - jfresolve.info - INFO - Auto-populated movie ID 637
+2026-01-12 21:48:49 - jfresolve.info - INFO - Created STRM files for TV show: Breaking Bad (5 seasons)
+2026-01-12 21:48:49 - jfresolve.info - INFO - Added to library: tv:1396 - Breaking Bad
+2026-01-12 21:48:49 - jfresolve.info - INFO - Auto-populated tv ID 1396
+2026-01-12 21:48:51 - jfresolve.info - INFO - Created STRM files for TV show: Avatar: The Last Airbender (3 seasons)
+2026-01-12 21:48:51 - jfresolve.info - INFO - Added to library: tv:246 - Avatar: The Last Airbender
+2026-01-12 21:48:51 - jfresolve.info - INFO - Auto-populated tv ID 246
+2026-01-12 21:48:53 - jfresolve.info - INFO - Created STRM files for TV show: Arcane (2 seasons)
+2026-01-12 21:48:53 - jfresolve.info - INFO - Added to library: tv:94605 - Arcane
+2026-01-12 21:48:53 - jfresolve.info - INFO - Auto-populated tv ID 94605
+2026-01-12 21:48:54 - jfresolve.info - INFO - Created STRM files for TV show: The Pitt (2 seasons)
+2026-01-12 21:48:54 - jfresolve.info - INFO - Added to library: tv:250307 - The Pitt
+2026-01-12 21:48:54 - jfresolve.info - INFO - Auto-populated tv ID 250307
+2026-01-12 21:48:55 - jfresolve.info - INFO - Created STRM files for TV show: The Boy's Word: Blood on the Asphalt (1 seasons)
+2026-01-12 21:48:56 - jfresolve.info - INFO - Added to library: tv:234763 - The Boy's Word: Blood on the Asphalt
+2026-01-12 21:48:56 - jfresolve.info - INFO - Auto-populated tv ID 234763
+2026-01-12 21:48:57 - jfresolve.info - INFO - Created STRM files for TV show: When Life Gives You Tangerines (1 seasons)
+2026-01-12 21:48:57 - jfresolve.info - INFO - Added to library: tv:219246 - When Life Gives You Tangerines
+2026-01-12 21:48:57 - jfresolve.info - INFO - Auto-populated tv ID 219246
+2026-01-12 21:48:58 - jfresolve.info - INFO - Created STRM files for TV show: Fullmetal Alchemist: Brotherhood (1 seasons)
+2026-01-12 21:48:58 - jfresolve.info - INFO - Added to library: tv:31911 - Fullmetal Alchemist: Brotherhood
+2026-01-12 21:48:58 - jfresolve.info - INFO - Auto-populated tv ID 31911
+2026-01-12 21:49:01 - jfresolve.info - INFO - Created STRM files for TV show: Better Call Saul (6 seasons)
+2026-01-12 21:49:01 - jfresolve.info - INFO - Added to library: tv:60059 - Better Call Saul
+2026-01-12 21:49:01 - jfresolve.info - INFO - Auto-populated tv ID 60059
+2026-01-12 21:49:03 - jfresolve.info - INFO - Created STRM files for TV show: The Chosen (5 seasons)
+2026-01-12 21:49:03 - jfresolve.info - INFO - Added to library: tv:85077 - The Chosen
+2026-01-12 21:49:03 - jfresolve.info - INFO - Auto-populated tv ID 85077
+2026-01-12 21:49:04 - jfresolve.info - INFO - Created STRM files for TV show: Chernobyl (1 seasons)
+2026-01-12 21:49:04 - jfresolve.info - INFO - Added to library: tv:87108 - Chernobyl
+2026-01-12 21:49:04 - jfresolve.info - INFO - Auto-populated tv ID 87108
+2026-01-12 21:49:08 - jfresolve.info - INFO - Created STRM files for TV show: Rick and Morty (8 seasons)
+2026-01-12 21:49:08 - jfresolve.info - INFO - Added to library: tv:60625 - Rick and Morty
+2026-01-12 21:49:08 - jfresolve.info - INFO - Auto-populated tv ID 60625
+2026-01-12 21:49:09 - jfresolve.info - INFO - Created STRM files for TV show: Adventure Time: Fionna & Cake (2 seasons)
+2026-01-12 21:49:09 - jfresolve.info - INFO - Added to library: tv:131378 - Adventure Time: Fionna & Cake
+2026-01-12 21:49:09 - jfresolve.info - INFO - Auto-populated tv ID 131378
+2026-01-12 21:49:11 - jfresolve.info - INFO - Created STRM files for TV show: The Owl House (3 seasons)
+2026-01-12 21:49:11 - jfresolve.info - INFO - Added to library: tv:92685 - The Owl House
+2026-01-12 21:49:11 - jfresolve.info - INFO - Auto-populated tv ID 92685
+2026-01-12 21:49:13 - jfresolve.info - INFO - Created STRM files for TV show: Anne with an E (3 seasons)
+2026-01-12 21:49:13 - jfresolve.info - INFO - Added to library: tv:70785 - Anne with an E
+2026-01-12 21:49:13 - jfresolve.info - INFO - Auto-populated tv ID 70785
+2026-01-12 21:49:15 - jfresolve.info - INFO - Created STRM files for TV show: Slam Dunk (1 seasons)
+2026-01-12 21:49:15 - jfresolve.info - INFO - Added to library: tv:42573 - Slam Dunk
+2026-01-12 21:49:15 - jfresolve.info - INFO - Auto-populated tv ID 42573
+2026-01-12 21:49:18 - jfresolve.info - INFO - Created STRM files for TV show: The Sopranos (6 seasons)
+2026-01-12 21:49:18 - jfresolve.info - INFO - Added to library: tv:1398 - The Sopranos
+2026-01-12 21:49:18 - jfresolve.info - INFO - Auto-populated tv ID 1398
+2026-01-12 21:49:19 - jfresolve.info - INFO - Created STRM files for movie: One Battle After Another with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:49:19 - jfresolve.info - INFO - Added to library: movie:1054867 - One Battle After Another
+2026-01-12 21:49:19 - jfresolve.info - INFO - Auto-populated movie ID 1054867
+2026-01-12 21:49:20 - jfresolve.info - INFO - Created STRM files for movie: Hamnet with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:49:20 - jfresolve.info - INFO - Added to library: movie:858024 - Hamnet
+2026-01-12 21:49:20 - jfresolve.info - INFO - Auto-populated movie ID 858024
+2026-01-12 21:49:20 - jfresolve.info - INFO - Created STRM files for movie: xXx with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:49:20 - jfresolve.info - INFO - Added to library: movie:7451 - xXx
+2026-01-12 21:49:20 - jfresolve.info - INFO - Auto-populated movie ID 7451
+2026-01-12 21:49:21 - jfresolve.info - INFO - Created STRM files for movie: Wicked: For Good with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:49:21 - jfresolve.info - INFO - Added to library: movie:967941 - Wicked: For Good
+2026-01-12 21:49:21 - jfresolve.info - INFO - Auto-populated movie ID 967941
+2026-01-12 21:49:21 - jfresolve.info - INFO - Created STRM files for movie: Marty Supreme with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:49:21 - jfresolve.info - INFO - Added to library: movie:1317288 - Marty Supreme
+2026-01-12 21:49:21 - jfresolve.info - INFO - Auto-populated movie ID 1317288
+2026-01-12 21:49:22 - jfresolve.info - INFO - Created STRM files for movie: TRON: Ares with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:49:22 - jfresolve.info - INFO - Added to library: movie:533533 - TRON: Ares
+2026-01-12 21:49:22 - jfresolve.info - INFO - Auto-populated movie ID 533533
+2026-01-12 21:49:23 - jfresolve.info - INFO - Created STRM files for movie: Primate with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:49:23 - jfresolve.info - INFO - Added to library: movie:1315303 - Primate
+2026-01-12 21:49:23 - jfresolve.info - INFO - Auto-populated movie ID 1315303
+2026-01-12 21:49:23 - jfresolve.info - INFO - Created STRM files for movie: Greenland 2: Migration with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:49:23 - jfresolve.info - INFO - Added to library: movie:840464 - Greenland 2: Migration
+2026-01-12 21:49:23 - jfresolve.info - INFO - Auto-populated movie ID 840464
+2026-01-12 21:49:24 - jfresolve.info - INFO - Created STRM files for movie: The Secret Agent with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:49:24 - jfresolve.info - INFO - Added to library: movie:1220564 - The Secret Agent
+2026-01-12 21:49:24 - jfresolve.info - INFO - Auto-populated movie ID 1220564
+2026-01-12 21:49:24 - jfresolve.info - INFO - Created STRM files for movie: 28 Years Later: The Bone Temple with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:49:24 - jfresolve.info - INFO - Added to library: movie:1272837 - 28 Years Later: The Bone Temple
+2026-01-12 21:49:24 - jfresolve.info - INFO - Auto-populated movie ID 1272837
+2026-01-12 21:49:25 - jfresolve.info - INFO - Created STRM files for movie: Sinners with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:49:25 - jfresolve.info - INFO - Added to library: movie:1233413 - Sinners
+2026-01-12 21:49:25 - jfresolve.info - INFO - Auto-populated movie ID 1233413
+2026-01-12 21:49:26 - jfresolve.info - INFO - Created STRM files for movie: One Last Adventure: The Making of Stranger Things 5 with qualities: ['1080p', '4K', '720p']
+2026-01-12 21:49:26 - jfresolve.info - INFO - Added to library: movie:1610413 - One Last Adventure: The Making of Stranger Things 5
+2026-01-12 21:49:26 - jfresolve.info - INFO - Auto-populated movie ID 1610413
+2026-01-12 21:49:27 - jfresolve.info - INFO - Created STRM files for TV show: The Night Manager (2 seasons)
+2026-01-12 21:49:27 - jfresolve.info - INFO - Added to library: tv:61859 - The Night Manager
+2026-01-12 21:49:27 - jfresolve.info - INFO - Auto-populated tv ID 61859
+2026-01-12 21:49:28 - jfresolve.info - INFO - Created STRM files for TV show: HIS & HERS (1 seasons)
+2026-01-12 21:49:28 - jfresolve.info - INFO - Added to library: tv:259731 - HIS & HERS
+2026-01-12 21:49:28 - jfresolve.info - INFO - Auto-populated tv ID 259731
+2026-01-12 21:49:30 - jfresolve.info - INFO - Created STRM files for TV show: Industry (4 seasons)
+2026-01-12 21:49:30 - jfresolve.info - INFO - Added to library: tv:90812 - Industry
+2026-01-12 21:49:30 - jfresolve.info - INFO - Auto-populated tv ID 90812
+2026-01-12 21:49:32 - jfresolve.info - INFO - Created STRM files for TV show: Hell's Paradise (2 seasons)
+2026-01-12 21:49:32 - jfresolve.info - INFO - Added to library: tv:117465 - Hell's Paradise
+2026-01-12 21:49:32 - jfresolve.info - INFO - Auto-populated tv ID 117465
+2026-01-12 21:49:33 - jfresolve.info - INFO - Created STRM files for TV show: Pluribus (1 seasons)
+2026-01-12 21:49:33 - jfresolve.info - INFO - Added to library: tv:225171 - Pluribus
+2026-01-12 21:49:33 - jfresolve.info - INFO - Auto-populated tv ID 225171
+2026-01-12 21:49:34 - jfresolve.info - INFO - Created STRM files for TV show: Fate/strange Fake (1 seasons)
+2026-01-12 21:49:34 - jfresolve.info - INFO - Added to library: tv:229858 - Fate/strange Fake
+2026-01-12 21:49:34 - jfresolve.info - INFO - Auto-populated tv ID 229858
+2026-01-12 21:49:35 - jfresolve.info - INFO - Created STRM files for TV show: Landman (2 seasons)
+2026-01-12 21:49:36 - jfresolve.info - INFO - Added to library: tv:157741 - Landman
+2026-01-12 21:49:36 - jfresolve.info - INFO - Auto-populated tv ID 157741
+2026-01-12 21:49:37 - jfresolve.info - INFO - Created STRM files for TV show: A Thousand Blows (2 seasons)
+2026-01-12 21:49:37 - jfresolve.info - INFO - Added to library: tv:208851 - A Thousand Blows
+2026-01-12 21:49:37 - jfresolve.info - INFO - Auto-populated tv ID 208851
+2026-01-12 21:49:38 - jfresolve.info - INFO - Created STRM files for TV show: Run Away (1 seasons)
+2026-01-12 21:49:38 - jfresolve.info - INFO - Added to library: tv:244244 - Run Away
+2026-01-12 21:49:38 - jfresolve.info - INFO - Auto-populated tv ID 244244
+2026-01-12 21:49:39 - jfresolve.info - INFO - Created STRM files for TV show: TRIGUN STAMPEDE (2 seasons)
+2026-01-12 21:49:39 - jfresolve.info - INFO - Added to library: tv:204266 - TRIGUN STAMPEDE
+2026-01-12 21:49:39 - jfresolve.info - INFO - Auto-populated tv ID 204266
+2026-01-12 21:49:41 - jfresolve.info - INFO - Created STRM files for TV show: Taxi Driver (3 seasons)
+2026-01-12 21:49:41 - jfresolve.info - INFO - Added to library: tv:119769 - Taxi Driver
+2026-01-12 21:49:41 - jfresolve.info - INFO - Auto-populated tv ID 119769
+2026-01-12 21:49:42 - jfresolve.info - INFO - Created STRM files for TV show: Heated Rivalry (1 seasons)
+2026-01-12 21:49:42 - jfresolve.info - INFO - Added to library: tv:301507 - Heated Rivalry
+2026-01-12 21:49:42 - jfresolve.info - INFO - Auto-populated tv ID 301507
+2026-01-12 21:54:54 - jfresolve.info - INFO - Stream resolve request: tv/1399 quality=auto index=0 imdb_id=tt0944947 season=1 episode=2
+2026-01-12 21:54:54 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt0944947:1:2.json
+2026-01-12 21:54:54 - jfresolve.info - INFO - Received 8 streams for episode tt0944947:1:2
+2026-01-12 21:54:57 - jfresolve.info - INFO - Stream resolve request: tv/1399 quality=auto index=0 imdb_id=tt0944947 season=1 episode=2
+2026-01-12 21:54:57 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt0944947:1:2.json
+2026-01-12 21:54:57 - jfresolve.info - INFO - Received 8 streams for episode tt0944947:1:2
+2026-01-12 21:54:58 - jfresolve.info - INFO - Stream resolve request: tv/1399 quality=auto index=0 imdb_id=tt0944947 season=1 episode=2
+2026-01-12 21:54:58 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt0944947:1:2.json
+2026-01-12 21:54:58 - jfresolve.info - INFO - Received 8 streams for episode tt0944947:1:2
+2026-01-12 21:55:00 - jfresolve.info - INFO - Stream resolve request: tv/1399 quality=auto index=0 imdb_id=tt0944947 season=1 episode=2
+2026-01-12 21:55:00 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt0944947:1:2.json
+2026-01-12 21:55:00 - jfresolve.info - INFO - Received 8 streams for episode tt0944947:1:2
+2026-01-12 21:55:02 - jfresolve.info - INFO - Stream resolve request: tv/1399 quality=auto index=0 imdb_id=tt0944947 season=1 episode=2
+2026-01-12 21:55:02 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt0944947:1:2.json
+2026-01-12 21:55:02 - jfresolve.info - INFO - Received 8 streams for episode tt0944947:1:2
+2026-01-12 21:55:03 - jfresolve.info - INFO - Stream resolve request: tv/1399 quality=auto index=0 imdb_id=tt0944947 season=1 episode=2
+2026-01-12 21:55:03 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt0944947:1:2.json
+2026-01-12 21:55:03 - jfresolve.info - INFO - Received 8 streams for episode tt0944947:1:2
+2026-01-12 21:55:36 - jfresolve.info - INFO - Stream resolve request: tv/1399 quality=auto index=0 imdb_id=tt0944947 season=1 episode=7
+2026-01-12 21:55:36 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt0944947:1:7.json
+2026-01-12 21:55:36 - jfresolve.info - INFO - Received 8 streams for episode tt0944947:1:7
+2026-01-12 21:55:38 - jfresolve.info - INFO - Stream resolve request: tv/1399 quality=auto index=0 imdb_id=tt0944947 season=1 episode=7
+2026-01-12 21:55:38 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt0944947:1:7.json
+2026-01-12 21:55:38 - jfresolve.info - INFO - Received 8 streams for episode tt0944947:1:7
+2026-01-12 21:55:39 - jfresolve.info - INFO - Stream resolve request: tv/1399 quality=auto index=0 imdb_id=tt0944947 season=1 episode=7
+2026-01-12 21:55:39 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt0944947:1:7.json
+2026-01-12 21:55:39 - jfresolve.info - INFO - Received 8 streams for episode tt0944947:1:7
+2026-01-12 21:55:41 - jfresolve.info - INFO - Stream resolve request: tv/1399 quality=auto index=0 imdb_id=tt0944947 season=1 episode=7
+2026-01-12 21:55:41 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt0944947:1:7.json
+2026-01-12 21:55:41 - jfresolve.info - INFO - Received 8 streams for episode tt0944947:1:7
+2026-01-12 21:55:42 - jfresolve.info - INFO - Stream resolve request: tv/1399 quality=auto index=0 imdb_id=tt0944947 season=1 episode=7
+2026-01-12 21:55:42 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt0944947:1:7.json
+2026-01-12 21:55:42 - jfresolve.info - INFO - Received 8 streams for episode tt0944947:1:7
+2026-01-12 21:55:44 - jfresolve.info - INFO - Stream resolve request: tv/1399 quality=auto index=0 imdb_id=tt0944947 season=1 episode=7
+2026-01-12 21:55:44 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt0944947:1:7.json
+2026-01-12 21:55:44 - jfresolve.info - INFO - Received 8 streams for episode tt0944947:1:7
+2026-01-12 21:56:27 - jfresolve.info - INFO - Stream resolve request: tv/71712 quality=auto index=0 imdb_id=tt6470478 season=1 episode=5
+2026-01-12 21:56:28 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt6470478:1:5.json
+2026-01-12 21:56:28 - jfresolve.info - INFO - Received 4 streams for episode tt6470478:1:5
+2026-01-12 21:56:28 - jfresolve.info - INFO - Requested index 1 out of range for quality 1080p. Falling back to index 0.
+2026-01-12 21:56:30 - jfresolve.info - INFO - Stream resolve request: tv/71712 quality=auto index=0 imdb_id=tt6470478 season=1 episode=5
+2026-01-12 21:56:30 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt6470478:1:5.json
+2026-01-12 21:56:30 - jfresolve.info - INFO - Received 4 streams for episode tt6470478:1:5
+2026-01-12 21:56:30 - jfresolve.info - INFO - Requested index 1 out of range for quality 1080p. Falling back to index 0.
+2026-01-12 21:56:34 - jfresolve.info - INFO - Stream resolve request: tv/71712 quality=auto index=0 imdb_id=tt6470478 season=1 episode=5
+2026-01-12 21:56:34 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt6470478:1:5.json
+2026-01-12 21:56:34 - jfresolve.info - INFO - Received 4 streams for episode tt6470478:1:5
+2026-01-12 21:56:34 - jfresolve.info - INFO - Requested index 1 out of range for quality 1080p. Falling back to index 0.
+2026-01-12 21:56:35 - jfresolve.info - INFO - Stream resolve request: tv/71712 quality=auto index=0 imdb_id=tt6470478 season=1 episode=5
+2026-01-12 21:56:35 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt6470478:1:5.json
+2026-01-12 21:56:35 - jfresolve.info - INFO - Received 4 streams for episode tt6470478:1:5
+2026-01-12 21:56:35 - jfresolve.info - INFO - Requested index 1 out of range for quality 1080p. Falling back to index 0.
+2026-01-12 21:56:36 - jfresolve.info - INFO - Stream resolve request: tv/71712 quality=auto index=0 imdb_id=tt6470478 season=1 episode=5
+2026-01-12 21:56:36 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt6470478:1:5.json
+2026-01-12 21:56:36 - jfresolve.info - INFO - Received 4 streams for episode tt6470478:1:5
+2026-01-12 21:56:37 - jfresolve.info - INFO - Requested index 1 out of range for quality 1080p. Falling back to index 0.
+2026-01-12 21:56:40 - jfresolve.info - INFO - Stream resolve request: tv/71712 quality=auto index=0 imdb_id=tt6470478 season=1 episode=5
+2026-01-12 21:56:40 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt6470478:1:5.json
+2026-01-12 21:56:40 - jfresolve.info - INFO - Received 4 streams for episode tt6470478:1:5
+2026-01-12 21:56:40 - jfresolve.info - INFO - Requested index 1 out of range for quality 1080p. Falling back to index 0.
