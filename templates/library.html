@@ -9,9 +9,15 @@ block content %}
 <div x-data="libraryPage()">
     <div class="flex justify-between items-center mb-6">
         <h1 class="text-3xl font-bold">Library</h1>
-        <button @click="confirmPurge()" class="btn btn-error btn-sm">
-            Purge All [jfr] Items
-        </button>
+        <div class="flex gap-2">
+            <button @click="confirmRegenerateAll()" class="btn btn-warning btn-sm" :disabled="regeneratingAll">
+                <span x-show="!regeneratingAll">Regenerate All</span>
+                <span x-show="regeneratingAll" class="loading loading-spinner loading-xs"></span>
+            </button>
+            <button @click="confirmPurge()" class="btn btn-error btn-sm">
+                Purge All [jfr] Items
+            </button>
+        </div>
     </div>
 
     <!-- Mobile View (Cards) -->
@@ -43,6 +49,11 @@ block content %}
                             x-show="item.media_type === 'tv'" :disabled="refreshing === item.id">
                             <span x-show="refreshing !== item.id">Refresh</span>
                             <span x-show="refreshing === item.id" class="loading loading-spinner loading-xs"></span>
+                        </button>
+                        <button @click="forceRegenItem(item)" class="btn btn-sm btn-warning flex-1"
+                            :disabled="regen === item.id">
+                            <span x-show="regen !== item.id">Force Regen</span>
+                            <span x-show="regen === item.id" class="loading loading-spinner loading-xs"></span>
                         </button>
                         <button @click="removeItem(item)" class="btn btn-sm btn-error flex-1"
                             :disabled="deleting === item.id">
@@ -97,6 +108,12 @@ block content %}
                                     x-show="item.media_type === 'tv'" :disabled="refreshing === item.id">
                                     <span x-show="refreshing !== item.id">Refresh</span>
                                     <span x-show="refreshing === item.id"
+                                        class="loading loading-spinner loading-xs"></span>
+                                </button>
+                                <button @click="forceRegenItem(item)" class="btn btn-xs btn-warning"
+                                    :disabled="regen === item.id">
+                                    <span x-show="regen !== item.id">Force Regen</span>
+                                    <span x-show="regen === item.id"
                                         class="loading loading-spinner loading-xs"></span>
                                 </button>
                                 <button @click="removeItem(item)" class="btn btn-xs btn-error"
@@ -177,6 +194,8 @@ block content %}
             pageSize: 20,
             totalPages: 1,
             refreshing: null,
+            regen: null,
+            regeneratingAll: false,
             deleting: null,
             // Modal State
             modal: {
@@ -355,8 +374,57 @@ block content %}
                             this.showAlert('Error', "Failed to purge: " + e.message);
                         }
                     },
-                    true, // Destructive
+                    true,
                     'Purge All'
+                );
+            },
+
+            forceRegenItem(item) {
+                this.showConfirm(
+                    'Force Regenerate',
+                    `Force regenerate STRM files for "${item.title}"? Existing files will be deleted and recreated with the current quality/stream settings.`,
+                    async () => {
+                        this.regen = item.id;
+                        try {
+                            const response = await fetch(
+                                `/api/library/refresh/${item.id}?force_regenerate=true`,
+                                { method: "POST" },
+                            );
+                            const data = await response.json();
+                            this.showAlert('Success', data.message);
+                            await this.loadItems();
+                        } catch (e) {
+                            this.showAlert('Error', "Failed to regenerate: " + e.message);
+                        } finally {
+                            this.regen = null;
+                        }
+                    },
+                    false,
+                    'Regenerate'
+                );
+            },
+
+            confirmRegenerateAll() {
+                this.showConfirm(
+                    'Regenerate All STRM Files',
+                    "This will delete and recreate all STRM files for every item in the library using the current quality and stream settings. This may take a while for large libraries.",
+                    async () => {
+                        this.regeneratingAll = true;
+                        try {
+                            const response = await fetch("/api/library/regenerate", {
+                                method: "POST",
+                            });
+                            const data = await response.json();
+                            this.showAlert('Success', data.message);
+                            await this.loadItems();
+                        } catch (e) {
+                            this.showAlert('Error', "Failed to regenerate: " + e.message);
+                        } finally {
+                            this.regeneratingAll = false;
+                        }
+                    },
+                    false,
+                    'Regenerate All'
                 );
             },
         };
