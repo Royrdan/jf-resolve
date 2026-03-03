@@ -218,6 +218,23 @@ class LibraryService:
             name = name.replace(char, "")
         return name.strip()
 
+    @staticmethod
+    def _build_version_label(quality: str, index: int) -> str:
+        """
+        Build the version label suffix for a STRM filename.
+        Jellyfin groups files with `Title - VersionLabel` as alternate versions.
+          index=0, quality=1080p  →  " - 1080p"
+          index=1, quality=1080p  →  " - 1080p-2"
+          index=0, quality=unknown → ""
+          index=1, quality=unknown → "-2"
+        """
+        index_suffix = f"-{index + 1}" if index > 0 else ""
+        if quality and quality != "unknown":
+            return f" - {quality}{index_suffix}"
+        elif index > 0:
+            return index_suffix
+        return ""
+
     async def _create_strm_files(
         self, item: LibraryItem, details: Dict, quality_versions: List[str]
     ):
@@ -240,18 +257,10 @@ class LibraryService:
 
         for quality in qualities:
             clean_title = self._sanitize_filename(item.title)
+            year_part = f" ({item.year})" if item.year else ""
             for i in range(streams_per_quality):
-                if quality == "unknown":
-                    if streams_per_quality > 1:
-                        filename = f"{clean_title} ({item.year}) - {i+1}.strm"
-                    else:
-                        filename = f"{clean_title} ({item.year}).strm"
-                else:
-                    if streams_per_quality > 1:
-                        filename = f"{clean_title} ({item.year}) - [{quality}] - {i+1}.strm"
-                    else:
-                        filename = f"{clean_title} ({item.year}) - [{quality}].strm"
-
+                version_label = self._build_version_label(quality, i)
+                filename = f"{clean_title}{year_part}{version_label}.strm"
                 strm_path = folder_path / filename
 
                 base_url = f"{server_url}/api/stream/resolve/movie/{item.tmdb_id}?quality={quality}&index={i}"
@@ -313,21 +322,14 @@ class LibraryService:
             for episode in episodes:
                 episode_num = episode.get("episode_number", 0)
                 episode_title = episode.get("name", f"Episode {episode_num}")
+                clean_title = self._sanitize_filename(item.title)
+                year_part = f" ({item.year})" if item.year else ""
+                ep_tag = f"S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)}"
 
                 for quality in qualities:
-                    clean_title = self._sanitize_filename(item.title)
                     for i in range(streams_per_quality):
-                        if quality == "unknown":
-                            if streams_per_quality > 1:
-                                filename = f"{clean_title} ({item.year}) - S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)} - {i+1}.strm"
-                            else:
-                                filename = f"{clean_title} ({item.year}) - S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)}.strm"
-                        else:
-                            if streams_per_quality > 1:
-                                filename = f"{clean_title} ({item.year}) - S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)} - [{quality}] - {i+1}.strm"
-                            else:
-                                filename = f"{clean_title} ({item.year}) - S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)} - [{quality}].strm"
-
+                        version_label = self._build_version_label(quality, i)
+                        filename = f"{clean_title}{year_part} - {ep_tag}{version_label}.strm"
                         strm_path = season_folder / filename
 
                         base_url = f"{server_url}/api/stream/resolve/tv/{item.tmdb_id}?season={season_num}&episode={episode_num}&quality={quality}&index={i}"
@@ -473,29 +475,42 @@ class LibraryService:
             return {"new_episodes": 0, "message": "Metadata updated"}
 
         else:  # TV show
-            # Fetch latest details
             details = await self.tmdb.get_tv_details(item.tmdb_id)
             current_seasons = details.get("number_of_seasons", 0)
 
-            # Check for new seasons/episodes
-            new_episodes = 0
             qualities = (
                 json.loads(item.quality_versions)
                 if item.quality_versions
                 else ["1080p"]
             )
-            # Get Stream Server URL - intelligently derived from Jellyfin URL
             server_url = await self._get_stream_server_url()
             streams_per_quality = await self.settings.get("streams_per_quality", 2)
+            folder_path = Path(item.folder_path)
 
+            if force_regenerate:
+                # Delete all existing .strm files across all season folders then recreate everything
+                if folder_path.exists():
+                    for season_folder in folder_path.iterdir():
+                        if season_folder.is_dir() and season_folder.name.startswith("Season"):
+                            for strm_file in season_folder.glob("*.strm"):
+                                await asyncio.to_thread(strm_file.unlink)
+
+                # Reset season tracking so _create_tv_strms covers all seasons
+                item.last_season_checked = 0
+                await self._create_tv_strms(item, details, qualities)
+                await self.db.commit()
+                await self._trigger_jellyfin_scan()
+                log_service.info(f"Regenerated all STRM files for TV show: {item.title}")
+                return {"new_episodes": 0, "message": "STRM files regenerated"}
+
+            # Normal refresh: only add new seasons/episodes
+            new_episodes = 0
             for season_num in range(item.last_season_checked + 1, current_seasons + 1):
                 season_details = await self.tmdb.get_season_details(
                     item.tmdb_id, season_num
                 )
                 episodes = season_details.get("episodes", [])
 
-                # Create season folder
-                folder_path = Path(item.folder_path)
                 season_folder = folder_path / f"Season {season_num:02d}"
                 await asyncio.to_thread(
                     season_folder.mkdir, parents=True, exist_ok=True
@@ -504,26 +519,23 @@ class LibraryService:
                 for episode in episodes:
                     episode_num = episode.get("episode_number", 0)
                     episode_title = episode.get("name", f"Episode {episode_num}")
+                    clean_title = self._sanitize_filename(item.title)
+                    year_part = f" ({item.year})" if item.year else ""
+                    ep_tag = f"S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)}"
 
                     for quality in qualities:
-                        clean_title = self._sanitize_filename(item.title)
                         for i in range(streams_per_quality):
-                            if quality == "unknown":
-                                if streams_per_quality > 1:
-                                    filename = f"{clean_title} ({item.year}) - S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)} - {i+1}.strm"
-                                else:
-                                    filename = f"{clean_title} ({item.year}) - S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)}.strm"
-                            else:
-                                if streams_per_quality > 1:
-                                    filename = f"{clean_title} ({item.year}) - S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)} - [{quality}] - {i+1}.strm"
-                                else:
-                                    filename = f"{clean_title} ({item.year}) - S{season_num:02d}E{episode_num:02d} - {self._sanitize_filename(episode_title)} - [{quality}].strm"
-
+                            version_label = self._build_version_label(quality, i)
+                            filename = f"{clean_title}{year_part} - {ep_tag}{version_label}.strm"
                             strm_path = season_folder / filename
 
-                            # Only create if doesn't exist
                             if not await asyncio.to_thread(strm_path.exists):
-                                stream_url = f"{server_url}/api/stream/resolve/tv/{item.tmdb_id}?season={season_num}&episode={episode_num}&quality={quality}&index={i}"
+                                base_url = f"{server_url}/api/stream/resolve/tv/{item.tmdb_id}?season={season_num}&episode={episode_num}&quality={quality}&index={i}"
+                                stream_url = (
+                                    f"{base_url}&imdb_id={item.imdb_id}"
+                                    if item.imdb_id
+                                    else base_url
+                                )
                                 await asyncio.to_thread(strm_path.write_text, stream_url)
                                 await asyncio.to_thread(strm_path.chmod, 0o644)
                                 new_episodes += 1
@@ -548,6 +560,28 @@ class LibraryService:
                 "new_episodes": new_episodes,
                 "message": f"Added {new_episodes} new episodes",
             }
+
+    async def regenerate_all(self) -> Dict:
+        """Force regenerate STRM files for every item in the library"""
+        result = await self.db.execute(select(LibraryItem))
+        items = result.scalars().all()
+
+        regenerated = 0
+        failed = 0
+        for item in items:
+            try:
+                await self.refresh_item(item.id, force_regenerate=True)
+                regenerated += 1
+            except Exception as e:
+                log_service.error(f"Failed to regenerate {item.title}: {e}")
+                failed += 1
+
+        log_service.info(f"Regenerated {regenerated} items ({failed} failed)")
+        return {
+            "regenerated": regenerated,
+            "failed": failed,
+            "message": f"Regenerated {regenerated} items" + (f" ({failed} failed)" if failed else ""),
+        }
 
     async def _trigger_jellyfin_scan(self, specific_path: str = None):
         """

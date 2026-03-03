@@ -157,14 +157,15 @@ async def regenerate_library(
 @router.post("/refresh/{item_id}")
 async def refresh_item(
     item_id: int,
+    force_regenerate: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Refresh metadata and check for new episodes"""
+    """Refresh metadata and check for new episodes. Set force_regenerate=true to delete and recreate all STRM files."""
     library = await get_library_service(db)
 
     try:
-        result = await library.refresh_item(item_id)
+        result = await library.refresh_item(item_id, force_regenerate=force_regenerate)
         return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
