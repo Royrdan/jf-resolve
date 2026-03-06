@@ -69,13 +69,22 @@ async def resolve_stream(
     tmdb = None
     api_key = await settings.get("tmdb_api_key")
 
-    manifest_url = await settings.get("stremio_manifest_url")
-    if not manifest_url:
+    # Get manifest URLs (support both list and single legacy format)
+    manifest_urls = await settings.get("stremio_manifest_urls")
+    if not manifest_urls:
+        # Fallback to legacy single URL setting
+        single_url = await settings.get("stremio_manifest_url")
+        if single_url:
+            manifest_urls = [single_url]
+
+    if not manifest_urls:
         raise HTTPException(
-            status_code=500, detail="Stremio manifest URL not configured"
+            status_code=500, detail="No Stremio manifest URLs configured"
         )
 
-    stremio = StremioService(manifest_url)
+    # Ensure it's a list
+    if isinstance(manifest_urls, str):
+        manifest_urls = [manifest_urls]
 
     failover = FailoverManager(db)
 
@@ -120,18 +129,50 @@ async def resolve_stream(
             log_service.error(f"No IMDB ID found for {media_type}:{tmdb_id}")
             raise HTTPException(status_code=404, detail="IMDB ID not found")
 
-        if media_type == "movie":
-            streams = await stremio.get_movie_streams(imdb_id)
-        else:
-            streams = await stremio.get_episode_streams(imdb_id, season, episode)
+        # Try each manifest URL until we get streams
+        streams = []
+        stremio = None
+        
+        for manifest_url in manifest_urls:
+            try:
+                log_service.info(f"Attempting to fetch streams from: {manifest_url}")
+                stremio = StremioService(manifest_url)
+                
+                if media_type == "movie":
+                    current_streams = await stremio.get_movie_streams(imdb_id)
+                else:
+                    current_streams = await stremio.get_episode_streams(imdb_id, season, episode)
+
+                if current_streams:
+                    streams = current_streams
+                    log_service.info(f"Successfully found {len(streams)} streams from {manifest_url}")
+                    break
+                else:
+                    log_service.warning(f"No streams found from {manifest_url}, trying next..." if len(manifest_urls) > 1 else f"No streams found from {manifest_url}")
+            
+            except Exception as e:
+                log_service.error(f"Error fetching from {manifest_url}: {e}")
+                continue
+            finally:
+                if stremio:
+                    await stremio.close()
 
         if not streams:
             log_service.error(
-                f"Stremio addon returned zero streams for {state_key} (IMDb: {imdb_id})"
+                f"All Stremio addons returned zero streams for {state_key} (IMDb: {imdb_id})"
             )
             raise HTTPException(
-                status_code=404, detail="No streams available from addon"
+                status_code=404, detail="No streams available from any configured addon"
             )
+            
+        # Re-initialize StremioService with the successful URL for select_stream logic
+        # Note: We closed it in the loop, but select_stream is a static/utility method on the instance
+        # actually select_stream is an async method on the instance, so we need an open instance?
+        # Let's check StremioService implementation. 
+        # But wait, select_stream doesn't use self.manifest_url or http client. 
+        # It just filters the list of streams. 
+        # However, to be safe, let's keep the last used instance or create a new one.
+        stremio = StremioService(manifest_url) 
 
         # Stop Index Increment Loop
         if use_index >= len(streams) and len(streams) > 0:
@@ -234,4 +275,5 @@ async def resolve_stream(
     finally:
         if tmdb:
             await tmdb.close()
-        await stremio.close()
+        if stremio:
+            await stremio.close()

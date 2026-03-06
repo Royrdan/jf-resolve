@@ -65,15 +65,38 @@
 
                 <div class="form-control">
                     <label class="label"
-                        ><span class="label-text"
-                            >Stremio Manifest URL</span
+                        ><span class="label-text font-semibold"
+                            >Stremio Manifest URLs</span
                         ></label
                     >
-                    <input
-                        type="text"
-                        x-model="settings.stremio_manifest_url"
-                        class="input input-bordered"
-                    />
+                    <label class="label">
+                        <span class="label-text-alt opacity-70">
+                            Add multiple manifest URLs for failover. The system will try them in order.
+                        </span>
+                    </label>
+                    
+                    <template x-for="(url, index) in settings.stremio_manifest_urls" :key="index">
+                        <div class="flex gap-2 mb-2">
+                            <input
+                                type="text"
+                                x-model="settings.stremio_manifest_urls[index]"
+                                class="input input-bordered w-full"
+                                placeholder="https://..."
+                            />
+                            <button 
+                                @click="removeManifestUrl(index)" 
+                                class="btn btn-square btn-outline btn-error"
+                                :disabled="settings.stremio_manifest_urls.length <= 1"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                    </template>
+                    
+                    <button @click="addManifestUrl()" class="btn btn-sm btn-ghost gap-2 self-start mt-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                        Add Manifest URL
+                    </button>
                 </div>
 
                 <div class="form-control">
@@ -1244,6 +1267,20 @@
                 if (!this.settings.anime_search_tv_path)
                     this.settings.anime_search_tv_path = "/anime-series-search";
 
+                // Stremio Manifest URLs migration
+                if (!this.settings.stremio_manifest_urls) {
+                    this.settings.stremio_manifest_urls = [];
+                    if (this.settings.stremio_manifest_url) {
+                        this.settings.stremio_manifest_urls.push(this.settings.stremio_manifest_url);
+                    } else {
+                        // Default empty slot
+                        this.settings.stremio_manifest_urls.push("");
+                    }
+                } else if (typeof this.settings.stremio_manifest_urls === 'string') {
+                    // Handle case where it might be returned as string (though backend ensures list)
+                    this.settings.stremio_manifest_urls = [this.settings.stremio_manifest_urls];
+                }
+
                 // Server binding defaults
                 if (!this.settings.HOST) this.settings.HOST = "0.0.0.0";
                 if (!this.settings.STREAM_HOST)
@@ -1312,7 +1349,25 @@
                 }
             },
 
+            addManifestUrl() {
+                if (!this.settings.stremio_manifest_urls) this.settings.stremio_manifest_urls = [];
+                this.settings.stremio_manifest_urls.push("");
+            },
+
+            removeManifestUrl(index) {
+                if (this.settings.stremio_manifest_urls && this.settings.stremio_manifest_urls.length > 1) {
+                    this.settings.stremio_manifest_urls.splice(index, 1);
+                }
+            },
+
             async saveSettings() {
+                // Sync back to legacy field for backward compatibility if needed, 
+                // or just rely on backend handling. backend now prefers stremio_manifest_urls.
+                // We'll update the legacy field to be the first one just in case.
+                if (this.settings.stremio_manifest_urls && this.settings.stremio_manifest_urls.length > 0) {
+                    this.settings.stremio_manifest_url = this.settings.stremio_manifest_urls[0];
+                }
+                
                 this.saving = true;
                 try {
                     const response = await fetch("/api/settings/", {
