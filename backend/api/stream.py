@@ -220,7 +220,11 @@ async def resolve_stream(
 
             # Check for known blocking domains to skip HEAD
             skip_head = False
-            if "torrentio" in stream_url or "real-debrid" in stream_url:
+            if (
+                "torrentio" in stream_url
+                or "real-debrid" in stream_url
+                or "elfhosted" in stream_url
+            ):
                 skip_head = True
                 log_service.info(
                     f"Skipping HEAD for known blocking domain: {stream_url}"
