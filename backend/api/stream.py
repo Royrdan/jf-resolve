@@ -221,80 +221,115 @@ async def resolve_stream(
             f"Resolved {state_key} quality={quality} index={use_index} attempt={state.attempt_count} → {stream_url[:100]}..."
         )
 
-        # Resolve redirect chain to get final URL
-        try:
-            log_service.info(f"Resolving redirect chain for: {stream_url}")
+        # Resolve redirect chain with in-request retry on season-pack episode mismatch.
+        # Each retry selects the next stream index immediately rather than waiting for
+        # Jellyfin to make another request.
+        MAX_EPISODE_RETRIES = 5
 
-            # Check for known blocking domains to skip HEAD
-            skip_head = False
-            if (
-                "torrentio" in stream_url
-                or "real-debrid" in stream_url
-                or "elfhosted" in stream_url
-            ):
-                skip_head = True
-                log_service.info(
-                    f"Skipping HEAD for known blocking domain: {stream_url}"
-                )
+        final_url = None
+        retry_stream_url = stream_url
+        retry_index = use_index
 
-            async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
-                # Try HEAD first
-                if not skip_head:
-                    try:
-                        log_service.info("Attempting HEAD request...")
-                        response = await client.head(stream_url, timeout=15.0)
-                        log_service.info(
-                            f"HEAD response: {response.status_code} {response.url}"
-                        )
-
-                        if response.status_code == 405:
-                            raise Exception("Method Not Allowed (405)")
-
-                        stream_url = str(response.url)
-                    except Exception as e:
-                        log_service.info(
-                            f"HEAD failed ({str(e)}), switching to GET stream..."
-                        )
-                        skip_head = True  # Force fallback
-
-                # Fallback to GET stream
-                if skip_head:
-                    async with client.stream(
-                        "GET", stream_url, timeout=15.0
-                    ) as response:
-                        stream_url = str(response.url)
-                        log_service.info(f"GET response URL: {stream_url}")
-
-            log_service.stream(f"Final resolved URL: {stream_url[:100]}...")
-
-            # Detect season-pack mismatch: final URL contains wrong episode number
-            if media_type == "tv" and season is not None and episode is not None:
-                ep_match = re.search(
-                    rf's{season:02d}e(\d+)', stream_url.lower()
-                )
-                if ep_match:
-                    resolved_ep = int(ep_match.group(1))
-                    if resolved_ep != episode:
+        async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
+            for retry in range(MAX_EPISODE_RETRIES + 1):
+                if retry > 0:
+                    retry_index += 1
+                    next_url = await stremio.select_stream(
+                        streams,
+                        target_quality,
+                        retry_index,
+                        fallback_enabled,
+                        fallback_order,
+                        season=season,
+                        episode=episode,
+                    )
+                    if not next_url or next_url == retry_stream_url:
                         log_service.warning(
-                            f"Season-pack mismatch for {state_key}: "
-                            f"requested E{episode:02d} but resolved URL contains E{resolved_ep:02d}. "
-                            f"Skipping cache — next request will try a different stream."
+                            f"No new stream at index {retry_index} for {state_key}, stopping retries."
                         )
-                        # Advance the failover index so the next retry picks a different stream
-                        state.current_index += 1
-                        state.attempt_count += 1
-                        await failover.update_state(state)
-                        # Return the redirect anyway (better than nothing right now)
-                        return RedirectResponse(url=stream_url, status_code=302)
+                        break
+                    retry_stream_url = next_url
+                    log_service.info(
+                        f"Episode mismatch retry {retry}/{MAX_EPISODE_RETRIES}: "
+                        f"trying stream index {retry_index} → {retry_stream_url[:80]}..."
+                    )
 
-            # Cache the result only when episode is correct (or movie/unknown)
-            RESOLVE_CACHE[cache_key] = (time.time(), stream_url)
+                try:
+                    skip_head = any(
+                        d in retry_stream_url
+                        for d in ("torrentio", "real-debrid", "elfhosted")
+                    )
+                    if skip_head:
+                        log_service.info(
+                            f"Skipping HEAD for known blocking domain: {retry_stream_url}"
+                        )
 
-        except Exception as e:
-            log_service.error(f"Failed to resolve redirects: {e}")
-            # Fallback to original URL if resolution fails
+                    resolved = retry_stream_url
 
-        return RedirectResponse(url=stream_url, status_code=302)
+                    if not skip_head:
+                        try:
+                            log_service.info("Attempting HEAD request...")
+                            response = await client.head(retry_stream_url, timeout=15.0)
+                            log_service.info(
+                                f"HEAD response: {response.status_code} {response.url}"
+                            )
+                            if response.status_code == 405:
+                                raise Exception("Method Not Allowed (405)")
+                            resolved = str(response.url)
+                        except Exception as e:
+                            log_service.info(
+                                f"HEAD failed ({e}), switching to GET stream..."
+                            )
+                            skip_head = True
+
+                    if skip_head:
+                        async with client.stream(
+                            "GET", retry_stream_url, timeout=15.0
+                        ) as response:
+                            resolved = str(response.url)
+                            log_service.info(f"GET response URL: {resolved}")
+
+                    log_service.stream(f"Final resolved URL: {resolved[:100]}...")
+
+                    # Check for season-pack episode mismatch
+                    if media_type == "tv" and season is not None and episode is not None:
+                        ep_match = re.search(rf's{season:02d}e(\d+)', resolved.lower())
+                        if ep_match:
+                            resolved_ep = int(ep_match.group(1))
+                            if resolved_ep != episode:
+                                log_service.warning(
+                                    f"Season-pack mismatch (attempt {retry + 1}/{MAX_EPISODE_RETRIES + 1}) "
+                                    f"for {state_key}: wanted E{episode:02d}, got E{resolved_ep:02d}."
+                                    + (
+                                        " Retrying next stream."
+                                        if retry < MAX_EPISODE_RETRIES
+                                        else " Retries exhausted."
+                                    )
+                                )
+                                continue
+
+                    # Correct episode (or movie/unknown) — accept this URL
+                    final_url = resolved
+                    break
+
+                except Exception as e:
+                    log_service.error(f"Failed to resolve redirects (attempt {retry + 1}): {e}")
+                    break
+
+        if final_url:
+            RESOLVE_CACHE[cache_key] = (time.time(), final_url)
+        else:
+            # All retries exhausted — serve the last resolved stream URL as a fallback
+            final_url = retry_stream_url
+            log_service.warning(
+                f"All stream retries exhausted for {state_key}. "
+                f"Serving best available — episode may be incorrect."
+            )
+            state.current_index = retry_index + 1
+            state.attempt_count += 1
+            await failover.update_state(state)
+
+        return RedirectResponse(url=final_url, status_code=302)
 
     except HTTPException:
         raise
