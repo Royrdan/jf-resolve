@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import time
 from typing import Dict, List, Optional
 
@@ -269,6 +270,40 @@ class StremioService:
 
         return "unknown"
 
+    @staticmethod
+    def _is_episode_specific(stream: Dict, season: int, episode: int) -> bool:
+        """Return True if the stream title/name contains the specific SxxExx pattern."""
+        title = stream.get("title", "").lower()
+        name = stream.get("name", "").lower()
+        text = f"{title} {name}"
+        pattern = rf's{season:02d}e{episode:02d}'
+        return bool(re.search(pattern, text))
+
+    @staticmethod
+    def _sort_by_episode_specificity(
+        streams: List[Dict], season: int, episode: int
+    ) -> List[Dict]:
+        """
+        Sort streams so episode-specific files come before season packs.
+        Episode-specific: title/name contains S02E06.
+        Season pack: title/name has S02 but no episode marker, or no marker at all.
+        """
+        episode_specific = []
+        season_packs = []
+        for s in streams:
+            title = (s.get("title", "") + " " + s.get("name", "")).lower()
+            if re.search(rf's{season:02d}e{episode:02d}', title):
+                episode_specific.append(s)
+            else:
+                season_packs.append(s)
+
+        if episode_specific:
+            log_service.info(
+                f"Stream prioritisation: {len(episode_specific)} episode-specific, "
+                f"{len(season_packs)} season-pack streams for S{season:02d}E{episode:02d}"
+            )
+        return episode_specific + season_packs
+
     async def select_stream(
         self,
         streams: List[Dict],
@@ -276,9 +311,13 @@ class StremioService:
         index: int,
         fallback_enabled: bool = True,
         fallback_order: List[str] = None,
+        season: Optional[int] = None,
+        episode: Optional[int] = None,
     ) -> Optional[str]:
         """
-        Select stream by quality and index
+        Select stream by quality and index.
+        When season/episode are provided, episode-specific streams are preferred
+        over season-pack streams within each quality tier.
         """
         if not streams:
             return None
@@ -289,8 +328,13 @@ class StremioService:
         # Try requested quality first
         quality_streams = [s for s in streams if self.detect_quality(s) == quality]
 
+        # Prioritise episode-specific streams over season packs
+        if season is not None and episode is not None and quality_streams:
+            quality_streams = self._sort_by_episode_specificity(
+                quality_streams, season, episode
+            )
+
         if quality_streams:
-            # Fallback to last available if index is too high
             idx = index
             if idx >= len(quality_streams):
                 log_service.info(
@@ -314,9 +358,16 @@ class StremioService:
                     s for s in streams if self.detect_quality(s) == fallback_quality
                 ]
 
+                if season is not None and episode is not None and fallback_streams:
+                    fallback_streams = self._sort_by_episode_specificity(
+                        fallback_streams, season, episode
+                    )
+
                 if fallback_streams:
                     log_service.info(f"Selected fallback quality: {fallback_quality}")
-                    return fallback_streams[0].get("url")
+                    # Use index for fallback too so failover cycling works
+                    idx = index if index < len(fallback_streams) else 0
+                    return fallback_streams[idx].get("url")
 
         # Last resort: return first available stream
         if streams:

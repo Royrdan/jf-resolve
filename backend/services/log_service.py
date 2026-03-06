@@ -57,6 +57,10 @@ class LogService:
         """Log error message"""
         self.error_logger.error(message, extra=kwargs)
 
+    def warning(self, message: str, **kwargs):
+        """Log warning message"""
+        self.info_logger.warning(message, extra=kwargs)
+
     def info(self, message: str, **kwargs):
         """Log info message"""
         self.info_logger.info(message, extra=kwargs)

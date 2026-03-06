@@ -1,6 +1,7 @@
 """Stream resolution API routes"""
 
 import httpx
+import re
 import time
 from datetime import datetime
 from typing import Optional
@@ -194,7 +195,13 @@ async def resolve_stream(
             target_quality = await settings.get("series_preferred_quality", "1080p")
 
         stream_url = await stremio.select_stream(
-            streams, target_quality, use_index, fallback_enabled, fallback_order
+            streams,
+            target_quality,
+            use_index,
+            fallback_enabled,
+            fallback_order,
+            season=season,
+            episode=episode,
         )
 
         if not stream_url:
@@ -260,7 +267,27 @@ async def resolve_stream(
 
             log_service.stream(f"Final resolved URL: {stream_url[:100]}...")
 
-            # Cache the result
+            # Detect season-pack mismatch: final URL contains wrong episode number
+            if media_type == "tv" and season is not None and episode is not None:
+                ep_match = re.search(
+                    rf's{season:02d}e(\d+)', stream_url.lower()
+                )
+                if ep_match:
+                    resolved_ep = int(ep_match.group(1))
+                    if resolved_ep != episode:
+                        log_service.warning(
+                            f"Season-pack mismatch for {state_key}: "
+                            f"requested E{episode:02d} but resolved URL contains E{resolved_ep:02d}. "
+                            f"Skipping cache — next request will try a different stream."
+                        )
+                        # Advance the failover index so the next retry picks a different stream
+                        state.current_index += 1
+                        state.attempt_count += 1
+                        await failover.update_state(state)
+                        # Return the redirect anyway (better than nothing right now)
+                        return RedirectResponse(url=stream_url, status_code=302)
+
+            # Cache the result only when episode is correct (or movie/unknown)
             RESOLVE_CACHE[cache_key] = (time.time(), stream_url)
 
         except Exception as e:
