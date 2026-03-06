@@ -313,8 +313,11 @@ async def resolve_stream(
                     break
 
                 except Exception as e:
-                    log_service.error(f"Failed to resolve redirects (attempt {retry + 1}): {e}")
-                    break
+                    log_service.error(
+                        f"Failed to resolve redirects (attempt {retry + 1}/{MAX_EPISODE_RETRIES + 1}) "
+                        f"[{type(e).__name__}]: {e}"
+                    )
+                    continue
 
         if final_url:
             RESOLVE_CACHE[cache_key] = (time.time(), final_url)
