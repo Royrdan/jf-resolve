@@ -269,7 +269,7 @@ async def resolve_stream(
                     if not skip_head:
                         try:
                             log_service.info("Attempting HEAD request...")
-                            response = await client.head(retry_stream_url, timeout=15.0)
+                            response = await client.head(retry_stream_url, timeout=8.0)
                             log_service.info(
                                 f"HEAD response: {response.status_code} {response.url}"
                             )
@@ -284,7 +284,7 @@ async def resolve_stream(
 
                     if skip_head:
                         async with client.stream(
-                            "GET", retry_stream_url, timeout=15.0
+                            "GET", retry_stream_url, timeout=8.0
                         ) as response:
                             resolved = str(response.url)
                             log_service.info(f"GET response URL: {resolved}")

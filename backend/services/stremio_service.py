@@ -337,11 +337,11 @@ class StremioService:
         if quality_streams:
             idx = index
             if idx >= len(quality_streams):
+                idx = index % len(quality_streams)
                 log_service.info(
-                    f"Requested index {index} out of range for quality {quality}. "
-                    f"Falling back to index {len(quality_streams) - 1}."
+                    f"Index {index} out of range for quality {quality} "
+                    f"({len(quality_streams)} streams). Wrapping to index {idx}."
                 )
-                idx = len(quality_streams) - 1
 
             return quality_streams[idx].get("url")
 
@@ -365,8 +365,7 @@ class StremioService:
 
                 if fallback_streams:
                     log_service.info(f"Selected fallback quality: {fallback_quality}")
-                    # Use index for fallback too so failover cycling works
-                    idx = index if index < len(fallback_streams) else 0
+                    idx = index % len(fallback_streams)
                     return fallback_streams[idx].get("url")
 
         # Last resort: return first available stream
