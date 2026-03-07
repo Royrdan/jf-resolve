@@ -131,6 +131,8 @@ async def resolve_stream(
             log_service.error(f"No IMDB ID found for {media_type}:{tmdb_id}")
             raise HTTPException(status_code=404, detail="IMDB ID not found")
 
+        stremio = None
+
         # --- RD Direct Library Lookup ---
         rd_api_key_val = await settings.get("rd_api_key")
         rd_direct_enabled = await settings.get("rd_direct_enabled", False)

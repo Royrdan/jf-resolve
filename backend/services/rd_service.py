@@ -17,10 +17,13 @@ class RDService:
     """
 
     BASE_URL = "https://api.real-debrid.com/rest/1.0"
-    CACHE_TTL = 300  # 5 minutes
+    CACHE_TTL = 300        # 5 minutes — torrent list
+    INFO_CACHE_TTL = 3600  # 60 minutes — per-torrent file info
 
     # Class-level cache keyed by api_key: (timestamp, torrent_list)
     _cache: Dict[str, tuple] = {}
+    # Per-torrent info cache keyed by torrent_id: (timestamp, info_dict)
+    _info_cache: Dict[str, tuple] = {}
 
     QUALITY_RANK = {"4k": 4, "2160p": 4, "1080p": 3, "720p": 2, "480p": 1}
 
@@ -94,7 +97,12 @@ class RDService:
         return torrents
 
     async def get_torrent_info(self, torrent_id: str) -> Optional[Dict]:
-        """Get full info (files + links) for a single torrent."""
+        """Get full info (files + links) for a single torrent (cached 60 min)."""
+        now = time.time()
+        cached = self._info_cache.get(torrent_id)
+        if cached and now - cached[0] < self.INFO_CACHE_TTL:
+            return cached[1]
+
         try:
             async with httpx.AsyncClient(verify=False) as client:
                 resp = await client.get(
@@ -103,7 +111,9 @@ class RDService:
                     timeout=10.0,
                 )
                 if resp.status_code == 200:
-                    return resp.json()
+                    info = resp.json()
+                    self._info_cache[torrent_id] = (now, info)
+                    return info
                 log_service.error(
                     f"RD: /torrents/info/{torrent_id} returned {resp.status_code}"
                 )
