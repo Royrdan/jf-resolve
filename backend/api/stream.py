@@ -16,6 +16,7 @@ from ..models.user import User
 from ..services.failover_manager import FailoverManager
 from ..services.library_service import LibraryService
 from ..services.log_service import log_service
+from ..services.rd_service import RDService
 from ..services.settings_manager import SettingsManager
 from ..services.stremio_service import StremioService
 from ..services.tmdb_service import TMDBService
@@ -129,6 +130,72 @@ async def resolve_stream(
         if not imdb_id:
             log_service.error(f"No IMDB ID found for {media_type}:{tmdb_id}")
             raise HTTPException(status_code=404, detail="IMDB ID not found")
+
+        # --- RD Direct Library Lookup ---
+        rd_api_key_val = await settings.get("rd_api_key")
+        rd_direct_enabled = await settings.get("rd_direct_enabled", False)
+
+        if rd_api_key_val and rd_direct_enabled:
+            rd_target_quality = quality
+            if not quality or quality == "auto":
+                rd_target_quality = await settings.get("series_preferred_quality", "1080p")
+
+            try:
+                if not tmdb and api_key:
+                    tmdb = TMDBService(api_key)
+
+                media_title = None
+                media_year = None
+
+                if tmdb:
+                    try:
+                        if media_type == "tv":
+                            details = await tmdb.get_tv_details(tmdb_id)
+                            media_title = details.get("name") or details.get("original_name")
+                        else:
+                            details = await tmdb.get_movie_details(tmdb_id)
+                            media_title = details.get("title") or details.get("original_title")
+                            release_date = details.get("release_date", "")
+                            if release_date:
+                                try:
+                                    media_year = int(release_date.split("-")[0])
+                                except (ValueError, IndexError):
+                                    pass
+                    except Exception as e:
+                        log_service.error(
+                            f"RD direct: failed to get TMDB title for {media_type}/{tmdb_id}: {e}"
+                        )
+
+                if media_title:
+                    rd = RDService(rd_api_key_val)
+                    rd_url = None
+
+                    if media_type == "tv":
+                        rd_url = await rd.find_episode_stream(
+                            media_title, season, episode, rd_target_quality
+                        )
+                    else:
+                        rd_url = await rd.find_movie_stream(
+                            media_title, media_year, rd_target_quality
+                        )
+
+                    if rd_url:
+                        log_service.stream(
+                            f"RD direct: {state_key} quality={rd_target_quality} "
+                            f"→ {rd_url[:100]}..."
+                        )
+                        RESOLVE_CACHE[cache_key] = (time.time(), rd_url)
+                        return RedirectResponse(url=rd_url, status_code=302)
+                    else:
+                        log_service.info(
+                            f"RD direct: no match for {state_key}, falling back to Stremio addons"
+                        )
+                else:
+                    log_service.info(
+                        f"RD direct: could not determine title for {media_type}/{tmdb_id}, skipping"
+                    )
+            except Exception as e:
+                log_service.error(f"RD direct lookup failed for {state_key}: {e}")
 
         # Try each manifest URL until we get streams
         streams = []

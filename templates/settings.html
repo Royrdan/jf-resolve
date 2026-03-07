@@ -18,6 +18,12 @@
         >
         <a
             class="tab flex-shrink-0"
+            :class="tab === 'debrid' ? 'tab-active' : ''"
+            @click="tab = 'debrid'"
+            >Debrid</a
+        >
+        <a
+            class="tab flex-shrink-0"
             :class="tab === 'paths' ? 'tab-active' : ''"
             @click="tab = 'paths'"
             >Paths</a
@@ -1157,6 +1163,67 @@
         </div>
     </div>
 
+    <div x-show="tab === 'debrid'" x-cloak>
+        <div class="card bg-base-100 shadow-xl">
+            <div class="card-body">
+                <h2 class="card-title">Debrid Settings</h2>
+                <p class="text-sm opacity-70 mb-4">
+                    Configure direct access to your debrid service library.
+                    When enabled, JF-Resolve will first check your existing
+                    debrid library before querying Stremio addons — guaranteeing
+                    cached, correctly-matched files.
+                </p>
+
+                <div class="divider">Real-Debrid</div>
+
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text font-semibold">Real-Debrid API Key</span>
+                    </label>
+                    <label class="label">
+                        <span class="label-text-alt opacity-70">
+                            Found at:
+                            <a href="https://real-debrid.com/apitoken" target="_blank" class="link link-primary">
+                                real-debrid.com/apitoken
+                            </a>
+                        </span>
+                    </label>
+                    <input
+                        type="password"
+                        x-model="settings.rd_api_key"
+                        class="input input-bordered"
+                        placeholder="Enter your Real-Debrid API token"
+                    />
+                </div>
+
+                <div class="form-control mt-4">
+                    <label class="label cursor-pointer">
+                        <span class="label-text font-semibold">Enable RD Direct Library Lookup</span>
+                        <input
+                            type="checkbox"
+                            x-model="settings.rd_direct_enabled"
+                            class="checkbox checkbox-primary"
+                        />
+                    </label>
+                    <label class="label">
+                        <span class="label-text-alt opacity-70">
+                            Search your RD torrent library first. Matches by show name,
+                            season, episode number, and prefers your configured quality.
+                            Falls back to Stremio addons if no match is found.
+                        </span>
+                    </label>
+                </div>
+
+                <div x-show="settings.rd_direct_enabled && settings.rd_api_key" class="alert alert-success mt-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span class="text-sm">RD direct lookup is active. Your library will be checked before Stremio addons.</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="flex justify-end mt-6">
         <button
             @click="saveSettings()"
@@ -1313,6 +1380,12 @@
                     this.settings.series_update_enabled = false;
                 if (!this.settings.series_update_frequency)
                     this.settings.series_update_frequency = "daily";
+
+                // Debrid Defaults
+                if (this.settings.rd_api_key === undefined)
+                    this.settings.rd_api_key = "";
+                if (this.settings.rd_direct_enabled === undefined)
+                    this.settings.rd_direct_enabled = false;
             },
 
             toggleQuality(quality) {
