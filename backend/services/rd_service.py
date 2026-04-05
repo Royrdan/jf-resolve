@@ -25,8 +25,6 @@ class RDService:
     # Per-torrent info cache keyed by torrent_id: (timestamp, info_dict)
     _info_cache: Dict[str, tuple] = {}
 
-    QUALITY_RANK = {"4k": 4, "2160p": 4, "1080p": 3, "720p": 2, "480p": 1}
-
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.headers = {"Authorization": f"Bearer {api_key}"}
@@ -41,17 +39,30 @@ class RDService:
         return re.sub(r"[\s._\-]+", " ", text.lower()).strip()
 
     @classmethod
-    def _quality_rank(cls, filename: str) -> int:
+    def _quality_rank(cls, filename: str) -> float:
         """Return quality rank from filename (higher = better)."""
         f = filename.lower()
-        for label, rank in cls.QUALITY_RANK.items():
-            if label in f:
-                return rank
-        return 0
+        if any(ind in f for ind in ["4k", "2160p", "2160", "uhd"]):
+            return 4.0
+        if any(ind in f for ind in ["1440p", "1440"]):
+            return 3.5
+        if any(ind in f for ind in ["1080p", "1080", "fhd"]):
+            return 3.0
+        if any(ind in f for ind in ["720p", "720", "hd"]):
+            return 2.0
+        if any(ind in f for ind in ["480p", "480"]):
+            return 1.0
+        return 0.0
 
     @staticmethod
-    def _preferred_rank(quality: str) -> int:
-        return {"4k": 4, "1080p": 3, "720p": 2, "480p": 1}.get(quality.lower(), 3)
+    def _preferred_rank(quality: str) -> float:
+        q = quality.lower()
+        if q in ["4k", "2160p", "2160", "uhd"]: return 4.0
+        if q in ["1440p", "1440"]: return 3.5
+        if q in ["1080p", "1080", "fhd"]: return 3.0
+        if q in ["720p", "720", "hd"]: return 2.0
+        if q in ["480p", "480"]: return 1.0
+        return 0.0
 
     # ------------------------------------------------------------------
     # RD API calls
@@ -234,6 +245,15 @@ class RDService:
                     continue
 
                 q_rank = self._quality_rank(file_path)
+
+                # If requested quality is explicit and this file has a detectable quality, they must match
+                if pref_rank > 0 and q_rank > 0 and q_rank != pref_rank:
+                    log_service.info(
+                        f"RD: skipping episode {files[file_idx].get('path')} "
+                        f"(q_rank={q_rank}) as it does not match requested quality (pref_rank={pref_rank})"
+                    )
+                    continue
+
                 score = 10 - abs(q_rank - pref_rank)
 
                 log_service.info(
@@ -314,6 +334,15 @@ class RDService:
 
                 file_path = files[file_idx].get("path", "").lower()
                 q_rank = self._quality_rank(file_path)
+
+                # If requested quality is explicit and this file has a detectable quality, they must match
+                if pref_rank > 0 and q_rank > 0 and q_rank != pref_rank:
+                    log_service.info(
+                        f"RD: skipping movie {files[file_idx].get('path')} "
+                        f"(q_rank={q_rank}) as it does not match requested quality (pref_rank={pref_rank})"
+                    )
+                    continue
+
                 score = 10 - abs(q_rank - pref_rank)
 
                 log_service.info(
