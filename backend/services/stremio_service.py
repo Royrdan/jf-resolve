@@ -248,6 +248,10 @@ class StremioService:
         name = stream.get("name", "").lower()
         text = f"{title} {name}"
 
+        # Detect CAMs/Screeners first so they don't get misclassified as high quality
+        if re.search(r'\b(cam|camrip|hdcam|hdts|telesync|hdtc|screener|dvdscr)\b', text):
+            return "cam"
+
         # 4K / 2160p
         if any(ind in text for ind in ["4k", "2160p", "2160"]):
             return "4k"

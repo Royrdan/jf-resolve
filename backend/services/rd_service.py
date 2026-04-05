@@ -42,6 +42,11 @@ class RDService:
     def _quality_rank(cls, filename: str) -> float:
         """Return quality rank from filename (higher = better)."""
         f = filename.lower()
+        
+        # Detect CAMs/Screeners
+        if re.search(r'\b(cam|camrip|hdcam|hdts|telesync|hdtc|screener|dvdscr)\b', f):
+            return 0.5
+            
         if any(ind in f for ind in ["4k", "2160p", "2160", "uhd"]):
             return 4.0
         if any(ind in f for ind in ["1440p", "1440"]):
@@ -62,6 +67,7 @@ class RDService:
         if q in ["1080p", "1080", "fhd"]: return 3.0
         if q in ["720p", "720", "hd"]: return 2.0
         if q in ["480p", "480"]: return 1.0
+        if q in ["cam"]: return 0.5
         return 0.0
 
     # ------------------------------------------------------------------
