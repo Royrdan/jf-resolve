@@ -174,11 +174,11 @@ async def resolve_stream(
 
                     if media_type == "tv":
                         rd_url = await rd.find_episode_stream(
-                            media_title, season, episode, rd_target_quality
+                            media_title, season, episode, rd_target_quality, use_index
                         )
                     else:
                         rd_url = await rd.find_movie_stream(
-                            media_title, media_year, rd_target_quality
+                            media_title, media_year, rd_target_quality, use_index
                         )
 
                     if rd_url:

@@ -184,6 +184,7 @@ class RDService:
         season: int,
         episode: int,
         preferred_quality: str = "1080p",
+        use_index: int = 0,
     ) -> Optional[str]:
         """
         Search the user's RD library for a specific TV episode.
@@ -223,8 +224,7 @@ class RDService:
             f"'{show_title}' S{season:02d}E{episode:02d} (preferred quality: {preferred_quality})"
         )
 
-        best_url: Optional[str] = None
-        best_score = -1
+        matches: List[tuple[float, str, str]] = []
 
         for torrent in candidates:
             info = await self.get_torrent_info(torrent["id"])
@@ -267,13 +267,19 @@ class RDService:
                     f"(q_rank={q_rank}, score={score})"
                 )
 
-                if score > best_score:
-                    best_score = score
-                    best_url = links[link_pos]
+                matches.append((score, links[link_pos], files[file_idx].get('path')))
 
-        if best_url:
-            log_service.info("RD: unrestricting best episode match")
-            return await self.unrestrict_link(best_url)
+        if matches:
+            # Sort descending by score
+            matches.sort(key=lambda x: x[0], reverse=True)
+            
+            if use_index < len(matches):
+                match_score, match_url, match_path = matches[use_index]
+                log_service.info(f"RD: unrestricting episode match at index {use_index} (score={match_score}): {match_path}")
+                return await self.unrestrict_link(match_url)
+            else:
+                log_service.info(f"RD: use_index {use_index} out of bounds (found {len(matches)} matches)")
+                return None
 
         log_service.info(
             f"RD: no episode file for S{season:02d}E{episode:02d} "
@@ -286,6 +292,7 @@ class RDService:
         movie_title: str,
         year: Optional[int],
         preferred_quality: str = "1080p",
+        use_index: int = 0,
     ) -> Optional[str]:
         """
         Search the user's RD library for a movie file.
@@ -313,8 +320,7 @@ class RDService:
             f"RD: {len(candidates)} candidate torrent(s) for movie '{movie_title}'"
         )
 
-        best_url: Optional[str] = None
-        best_score = -1
+        matches: List[tuple[float, str, str]] = []
 
         for torrent in candidates:
             info = await self.get_torrent_info(torrent["id"])
@@ -356,13 +362,19 @@ class RDService:
                     f"(q_rank={q_rank}, score={score})"
                 )
 
-                if score > best_score:
-                    best_score = score
-                    best_url = links[link_pos]
+                matches.append((score, links[link_pos], files[file_idx].get('path')))
 
-        if best_url:
-            log_service.info("RD: unrestricting best movie match")
-            return await self.unrestrict_link(best_url)
+        if matches:
+            # Sort descending by score
+            matches.sort(key=lambda x: x[0], reverse=True)
+            
+            if use_index < len(matches):
+                match_score, match_url, match_path = matches[use_index]
+                log_service.info(f"RD: unrestricting movie match at index {use_index} (score={match_score}): {match_path}")
+                return await self.unrestrict_link(match_url)
+            else:
+                log_service.info(f"RD: use_index {use_index} out of bounds (found {len(matches)} matches)")
+                return None
 
         log_service.info(f"RD: no suitable movie file found for '{movie_title}'")
         return None
