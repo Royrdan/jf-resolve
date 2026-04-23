@@ -133,6 +133,31 @@ async def resolve_stream(
 
         stremio = None
 
+        # Fetch TMDB metadata once — used by both RD direct lookup and the
+        # post-Stremio metadata filter to reject mistagged streams.
+        media_title = None
+        media_year = None
+        if not tmdb and api_key:
+            tmdb = TMDBService(api_key)
+        if tmdb:
+            try:
+                if media_type == "tv":
+                    details = await tmdb.get_tv_details(tmdb_id)
+                    media_title = details.get("name") or details.get("original_name")
+                else:
+                    details = await tmdb.get_movie_details(tmdb_id)
+                    media_title = details.get("title") or details.get("original_title")
+                    release_date = details.get("release_date", "")
+                    if release_date:
+                        try:
+                            media_year = int(release_date.split("-")[0])
+                        except (ValueError, IndexError):
+                            pass
+            except Exception as e:
+                log_service.error(
+                    f"Failed to fetch TMDB metadata for {media_type}/{tmdb_id}: {e}"
+                )
+
         # --- RD Direct Library Lookup ---
         rd_api_key_val = await settings.get("rd_api_key")
         rd_direct_enabled = await settings.get("rd_direct_enabled", False)
@@ -143,31 +168,6 @@ async def resolve_stream(
                 rd_target_quality = await settings.get("series_preferred_quality", "1080p")
 
             try:
-                if not tmdb and api_key:
-                    tmdb = TMDBService(api_key)
-
-                media_title = None
-                media_year = None
-
-                if tmdb:
-                    try:
-                        if media_type == "tv":
-                            details = await tmdb.get_tv_details(tmdb_id)
-                            media_title = details.get("name") or details.get("original_name")
-                        else:
-                            details = await tmdb.get_movie_details(tmdb_id)
-                            media_title = details.get("title") or details.get("original_title")
-                            release_date = details.get("release_date", "")
-                            if release_date:
-                                try:
-                                    media_year = int(release_date.split("-")[0])
-                                except (ValueError, IndexError):
-                                    pass
-                    except Exception as e:
-                        log_service.error(
-                            f"RD direct: failed to get TMDB title for {media_type}/{tmdb_id}: {e}"
-                        )
-
                 if media_title:
                     rd = RDService(rd_api_key_val)
                     rd_url = None
@@ -234,7 +234,19 @@ async def resolve_stream(
             raise HTTPException(
                 status_code=404, detail="No streams available from any configured addon"
             )
-            
+
+        # Drop streams whose title/filename clearly does not match the requested
+        # media — guards against indexer cross-tagging (e.g. unrelated torrents
+        # returned for a given IMDb id).
+        if media_title:
+            streams = StremioService.filter_streams_by_metadata(
+                streams,
+                media_title,
+                year=media_year if media_type == "movie" else None,
+                season=season if media_type == "tv" else None,
+                episode=episode if media_type == "tv" else None,
+            )
+
         # Re-initialize StremioService with the successful URL for select_stream logic
         # Note: We closed it in the loop, but select_stream is a static/utility method on the instance
         # actually select_stream is an async method on the instance, so we need an open instance?

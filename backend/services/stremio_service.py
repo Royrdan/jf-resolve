@@ -239,6 +239,123 @@ class StremioService:
             return []
 
     @staticmethod
+    def _normalise_text(text: str) -> str:
+        """Lowercase and collapse separators (whitespace, dots, underscores, dashes) to single spaces."""
+        return re.sub(r"[\s._\-]+", " ", text.lower()).strip()
+
+    @staticmethod
+    def _stream_text(stream: Dict) -> str:
+        """Concatenate every field that may contain the release/file name."""
+        parts = [
+            stream.get("title", "") or "",
+            stream.get("name", "") or "",
+        ]
+        bh = stream.get("behaviorHints") or {}
+        if isinstance(bh, dict):
+            parts.append(bh.get("filename", "") or "")
+            parts.append(bh.get("bingeGroup", "") or "")
+        return " ".join(parts)
+
+    @classmethod
+    def _title_matches(cls, text: str, title: str) -> bool:
+        """All significant title words (>1 char) must appear in the normalised text."""
+        norm_text = cls._normalise_text(text)
+        words = [w for w in cls._normalise_text(title).split() if len(w) > 1]
+        if not words:
+            return True
+        return all(w in norm_text for w in words)
+
+    @staticmethod
+    def _episode_marker_matches(text: str, season: int, episode: int) -> bool:
+        """
+        True if `text` contains a marker for the given season/episode in any common form:
+        s01e01, S1E1, s.1.e.1, s 1 e 1, s_1_e_1, 1x01, 01x1, "season 1 episode 1", etc.
+        Leading zeros are optional; separators between markers can be dots, spaces, dashes,
+        or underscores. Trailing digits are rejected so e1 doesn't match e10.
+        """
+        s = int(season)
+        e = int(episode)
+        text_lower = text.lower()
+        sep = r'[\s._\-]*'
+        patterns = [
+            rf'(?<![a-z0-9])s{sep}0*{s}{sep}e{sep}0*{e}(?!\d)',
+            rf'(?<![a-z0-9])0*{s}\s*x\s*0*{e}(?!\d)',
+            rf'season{sep}0*{s}[\s._\-]+episode{sep}0*{e}(?!\d)',
+            rf'episode{sep}0*{e}[\s._\-]+season{sep}0*{s}(?!\d)',
+        ]
+        return any(re.search(p, text_lower) for p in patterns)
+
+    @staticmethod
+    def _year_conflicts(text: str, expected_year: int, tolerance: int = 1) -> bool:
+        """
+        True if the text contains 4-digit year tokens AND none of them match
+        `expected_year` within `tolerance`. If no year tokens are present,
+        we can't conclude a conflict.
+        """
+        years = [int(m.group()) for m in re.finditer(r'(?<!\d)(?:19|20)\d{2}(?!\d)', text)]
+        if not years:
+            return False
+        return not any(abs(y - expected_year) <= tolerance for y in years)
+
+    @classmethod
+    def filter_streams_by_metadata(
+        cls,
+        streams: List[Dict],
+        title: Optional[str],
+        year: Optional[int] = None,
+        season: Optional[int] = None,
+        episode: Optional[int] = None,
+    ) -> List[Dict]:
+        """
+        Soft filter: drop streams whose title/filename plainly does not match the
+        requested media. If filtering eliminates every stream we return the
+        original list (with a warning) so resolution can still proceed.
+        """
+        if not streams or not title:
+            return streams
+
+        matched: List[Dict] = []
+        rejected_samples: List[str] = []
+
+        is_episode = season is not None and episode is not None
+
+        for stream in streams:
+            text = cls._stream_text(stream)
+            if not cls._title_matches(text, title):
+                if len(rejected_samples) < 3:
+                    rejected_samples.append(text[:120].replace("\n", " "))
+                continue
+            if is_episode and not cls._episode_marker_matches(text, season, episode):
+                if len(rejected_samples) < 3:
+                    rejected_samples.append(text[:120].replace("\n", " "))
+                continue
+            if (not is_episode) and year and cls._year_conflicts(text, year):
+                if len(rejected_samples) < 3:
+                    rejected_samples.append(text[:120].replace("\n", " "))
+                continue
+            matched.append(stream)
+
+        rejected_count = len(streams) - len(matched)
+        if rejected_count:
+            log_service.info(
+                f"Stream metadata filter: rejected {rejected_count}/{len(streams)} stream(s) "
+                f"that did not match title='{title}'"
+                + (f" S{season:02d}E{episode:02d}" if is_episode else "")
+                + (f" year={year}" if (not is_episode) and year else "")
+                + (f". Samples: {rejected_samples}" if rejected_samples else "")
+            )
+
+        if not matched:
+            log_service.warning(
+                f"Stream metadata filter: no streams matched title='{title}'"
+                + (f" S{season:02d}E{episode:02d}" if is_episode else "")
+                + ". Falling back to unfiltered list."
+            )
+            return streams
+
+        return matched
+
+    @staticmethod
     def detect_quality(stream: Dict) -> str:
         """
         Detect quality from stream title/name
