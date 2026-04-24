@@ -490,43 +490,52 @@ class LibraryService:
             raise ValueError(f"Library item {item_id} not found")
 
         if item.media_type == "movie":
-            # Do all DB lookups (settings.get, etc.) BEFORE mutating the item, so
-            # autoflush of a dirty session can't fire during a query and crash with
-            # greenlet_spawn in the async session.
-            stored_qualities = None
-            qualities = None
-            if force_regenerate:
-                stored_qualities = (
-                    json.loads(item.quality_versions)
-                    if item.quality_versions
-                    else None
-                )
-                qualities = await self._resolve_movie_qualities("movie", stored_qualities)
+            # Disable autoflush for the whole movie flow. Two failure modes we're
+            # avoiding:
+            #   1. settings.get on a dirty session → autoflush fires during the
+            #      query → greenlet_spawn in async land.
+            #   2. Committing before _create_movie_strms expires `updated_at`
+            #      (because of onupdate=func.now()), so reading it later inside
+            #      _create_movie_strms triggers an async lazy-load → greenlet_spawn.
+            # With autoflush off we can mutate freely and commit once at the end.
+            with self.db.no_autoflush:
+                stored_qualities = None
+                qualities = None
+                if force_regenerate:
+                    stored_qualities = (
+                        json.loads(item.quality_versions)
+                        if item.quality_versions
+                        else None
+                    )
+                    qualities = await self._resolve_movie_qualities(
+                        "movie", stored_qualities
+                    )
 
-            # Network call — safe to do before mutation, no DB autoflush risk.
-            details = await self.tmdb.get_movie_details(item.tmdb_id)
+                details = await self.tmdb.get_movie_details(item.tmdb_id)
+                item.poster_path = details.get("poster_path")
+                item.backdrop_path = details.get("backdrop_path")
+                item.overview = details.get("overview")
+                if force_regenerate and stored_qualities != qualities:
+                    # Persist the resolved list so .metadata.json and future regens
+                    # stay consistent (e.g. ["auto"] rows from the old Jellyseerr
+                    # path get healed).
+                    item.quality_versions = json.dumps(qualities)
 
-            # Mutate the item, then commit before any further DB/file work.
-            item.poster_path = details.get("poster_path")
-            item.backdrop_path = details.get("backdrop_path")
-            item.overview = details.get("overview")
-            if force_regenerate and stored_qualities != qualities:
-                # Persist the resolved list so .metadata.json and future regens stay
-                # consistent (e.g. ["auto"] rows from the old Jellyseerr path get healed).
-                item.quality_versions = json.dumps(qualities)
+                if force_regenerate:
+                    # Strip stale .strm files in the movie folder so removed
+                    # qualities or legacy naming (e.g. "auto.strm",
+                    # "[1080p].strm") don't linger.
+                    folder_path = Path(item.folder_path)
+                    if folder_path.exists():
+                        for strm_file in folder_path.glob("*.strm"):
+                            await asyncio.to_thread(strm_file.unlink)
+
+                    await self._create_movie_strms(item, qualities)
+                    log_service.info(
+                        f"Regenerated STRM files for movie: {item.title}"
+                    )
+
             await self.db.commit()
-
-            if force_regenerate:
-                # Strip stale .strm files in the movie folder so removed qualities or
-                # legacy naming (e.g. "auto.strm", "[1080p].strm") don't linger.
-                folder_path = Path(item.folder_path)
-                if folder_path.exists():
-                    for strm_file in folder_path.glob("*.strm"):
-                        await asyncio.to_thread(strm_file.unlink)
-
-                await self._create_movie_strms(item, qualities)
-                log_service.info(f"Regenerated STRM files for movie: {item.title}")
-
             return {"new_episodes": 0, "message": "Metadata updated"}
 
         else:  # TV show
