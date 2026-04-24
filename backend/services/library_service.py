@@ -491,6 +491,12 @@ class LibraryService:
                 if stored_qualities != qualities:
                     item.quality_versions = json.dumps(qualities)
 
+            # Commit pending metadata/quality changes before any further DB lookups
+            # (settings.get etc.) so autoflush doesn't fire mid-flow and trip the
+            # async session into a sync IO path (greenlet_spawn error).
+            await self.db.commit()
+
+            if force_regenerate:
                 # Strip stale .strm files in the movie folder so removed qualities or
                 # legacy naming (e.g. "auto.strm", "[1080p].strm") don't linger.
                 folder_path = Path(item.folder_path)
@@ -501,7 +507,6 @@ class LibraryService:
                 await self._create_movie_strms(item, qualities)
                 log_service.info(f"Regenerated STRM files for movie: {item.title}")
 
-            await self.db.commit()
             return {"new_episodes": 0, "message": "Metadata updated"}
 
         else:  # TV show
