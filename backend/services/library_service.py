@@ -472,12 +472,11 @@ class LibraryService:
             raise ValueError(f"Library item {item_id} not found")
 
         if item.media_type == "movie":
-            # For movies, just update metadata
-            details = await self.tmdb.get_movie_details(item.tmdb_id)
-            item.poster_path = details.get("poster_path")
-            item.backdrop_path = details.get("backdrop_path")
-            item.overview = details.get("overview")
-
+            # Do all DB lookups (settings.get, etc.) BEFORE mutating the item, so
+            # autoflush of a dirty session can't fire during a query and crash with
+            # greenlet_spawn in the async session.
+            stored_qualities = None
+            qualities = None
             if force_regenerate:
                 stored_qualities = (
                     json.loads(item.quality_versions)
@@ -486,14 +485,17 @@ class LibraryService:
                 )
                 qualities = await self._resolve_movie_qualities("movie", stored_qualities)
 
+            # Network call — safe to do before mutation, no DB autoflush risk.
+            details = await self.tmdb.get_movie_details(item.tmdb_id)
+
+            # Mutate the item, then commit before any further DB/file work.
+            item.poster_path = details.get("poster_path")
+            item.backdrop_path = details.get("backdrop_path")
+            item.overview = details.get("overview")
+            if force_regenerate and stored_qualities != qualities:
                 # Persist the resolved list so .metadata.json and future regens stay
                 # consistent (e.g. ["auto"] rows from the old Jellyseerr path get healed).
-                if stored_qualities != qualities:
-                    item.quality_versions = json.dumps(qualities)
-
-            # Commit pending metadata/quality changes before any further DB lookups
-            # (settings.get etc.) so autoflush doesn't fire mid-flow and trip the
-            # async session into a sync IO path (greenlet_spawn error).
+                item.quality_versions = json.dumps(qualities)
             await self.db.commit()
 
             if force_regenerate:
