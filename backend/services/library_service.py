@@ -532,8 +532,10 @@ class LibraryService:
                             for strm_file in season_folder.glob("*.strm"):
                                 await asyncio.to_thread(strm_file.unlink)
 
-                # Reset season tracking so _create_tv_strms covers all seasons
-                item.last_season_checked = 0
+                # NOTE: don't mutate item before _create_tv_strms — it does its own
+                # settings.get calls and a dirty session would autoflush mid-query
+                # (greenlet_spawn error). _create_tv_strms updates last_season_checked
+                # to num_seasons internally at the end.
                 await self._create_tv_strms(item, details, qualities)
                 await self.db.commit()
                 await self._trigger_jellyfin_scan()
@@ -606,11 +608,18 @@ class LibraryService:
         regenerated = 0
         failed = 0
         for item in items:
+            title = item.title  # capture now in case the session goes bad below
             try:
                 await self.refresh_item(item.id, force_regenerate=True)
                 regenerated += 1
             except Exception as e:
-                log_service.error(f"Failed to regenerate {item.title}: {e}")
+                # Roll back so a failed flush doesn't poison the next iteration's
+                # session (subsequent attribute access would re-raise greenlet_spawn).
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+                log_service.error(f"Failed to regenerate {title}: {e}")
                 failed += 1
 
         log_service.info(f"Regenerated {regenerated} items ({failed} failed)")
