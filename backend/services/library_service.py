@@ -327,9 +327,18 @@ class LibraryService:
         num_seasons = details.get("number_of_seasons", 0)
 
         for season_num in range(1, num_seasons + 1):
-            season_details = await self.tmdb.get_season_details(
-                item.tmdb_id, season_num
-            )
+            try:
+                season_details = await self.tmdb.get_season_details(
+                    item.tmdb_id, season_num
+                )
+            except Exception as e:
+                # TMDB sometimes lists a season in number_of_seasons before its
+                # detail record exists (announced/upcoming season → 404). Skip
+                # it so the rest of the show still regenerates cleanly.
+                log_service.warning(
+                    f"Skipping season {season_num} of {item.title}: {e}"
+                )
+                continue
             episodes = season_details.get("episodes", [])
 
             season_folder = folder_path / f"Season {season_num:02d}"
@@ -365,8 +374,17 @@ class LibraryService:
         # Update last checked season/episode
         item.last_season_checked = num_seasons
         if num_seasons > 0:
-            last_season = await self.tmdb.get_season_details(item.tmdb_id, num_seasons)
-            item.last_episode_checked = len(last_season.get("episodes", []))
+            try:
+                last_season = await self.tmdb.get_season_details(
+                    item.tmdb_id, num_seasons
+                )
+                item.last_episode_checked = len(last_season.get("episodes", []))
+            except Exception as e:
+                # Final season may not have a TMDB record yet (announced only).
+                log_service.warning(
+                    f"Could not fetch final season {num_seasons} of {item.title} "
+                    f"for episode count: {e}"
+                )
 
         # Create metadata JSON
         metadata = {
@@ -602,19 +620,20 @@ class LibraryService:
 
     async def regenerate_all(self) -> Dict:
         """Force regenerate STRM files for every item in the library"""
-        result = await self.db.execute(select(LibraryItem))
-        items = result.scalars().all()
+        # Read just the (id, title) pairs we need. Holding session-attached ORM
+        # objects across iterations is unsafe: a per-item rollback expires every
+        # attached instance, and the next iteration's attribute access triggers
+        # an async lazy-load (greenlet_spawn) that escapes the per-item handler.
+        result = await self.db.execute(select(LibraryItem.id, LibraryItem.title))
+        items = result.all()
 
         regenerated = 0
         failed = 0
-        for item in items:
-            title = item.title  # capture now in case the session goes bad below
+        for item_id, title in items:
             try:
-                await self.refresh_item(item.id, force_regenerate=True)
+                await self.refresh_item(item_id, force_regenerate=True)
                 regenerated += 1
             except Exception as e:
-                # Roll back so a failed flush doesn't poison the next iteration's
-                # session (subsequent attribute access would re-raise greenlet_spawn).
                 try:
                     await self.db.rollback()
                 except Exception:
