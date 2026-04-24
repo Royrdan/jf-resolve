@@ -84,6 +84,9 @@ class LibraryService:
         """
         if await self.is_in_library(tmdb_id, media_type):
             raise ValueError(f"{media_type}:{tmdb_id} already in library")
+
+        quality_versions = await self._resolve_movie_qualities(media_type, quality_versions)
+
         if media_type == "movie":
             details = await self.tmdb.get_movie_details(tmdb_id)
             title = details.get("title", "Unknown")
@@ -234,6 +237,19 @@ class LibraryService:
         elif index > 0:
             return index_suffix
         return ""
+
+    async def _resolve_movie_qualities(
+        self, media_type: str, quality_versions: Optional[List[str]]
+    ) -> List[str]:
+        """
+        Movies should always be expanded to the user's configured quality_versions
+        when the caller passed nothing meaningful (empty list or the TV-style
+        ["auto"] sentinel). TV shows pass through unchanged — "auto" is intentional
+        there and resolved at play time.
+        """
+        if media_type == "movie" and (not quality_versions or quality_versions == ["auto"]):
+            return await self.settings.get("quality_versions", ["1080p"])
+        return quality_versions
 
     async def _create_strm_files(
         self, item: LibraryItem, details: Dict, quality_versions: List[str]
@@ -461,17 +477,31 @@ class LibraryService:
             item.poster_path = details.get("poster_path")
             item.backdrop_path = details.get("backdrop_path")
             item.overview = details.get("overview")
-            await self.db.commit()
 
             if force_regenerate:
-                qualities = (
+                stored_qualities = (
                     json.loads(item.quality_versions)
                     if item.quality_versions
-                    else ["1080p"]
+                    else None
                 )
+                qualities = await self._resolve_movie_qualities("movie", stored_qualities)
+
+                # Persist the resolved list so .metadata.json and future regens stay
+                # consistent (e.g. ["auto"] rows from the old Jellyseerr path get healed).
+                if stored_qualities != qualities:
+                    item.quality_versions = json.dumps(qualities)
+
+                # Strip stale .strm files in the movie folder so removed qualities or
+                # legacy naming (e.g. "auto.strm", "[1080p].strm") don't linger.
+                folder_path = Path(item.folder_path)
+                if folder_path.exists():
+                    for strm_file in folder_path.glob("*.strm"):
+                        await asyncio.to_thread(strm_file.unlink)
+
                 await self._create_movie_strms(item, qualities)
                 log_service.info(f"Regenerated STRM files for movie: {item.title}")
 
+            await self.db.commit()
             return {"new_episodes": 0, "message": "Metadata updated"}
 
         else:  # TV show
