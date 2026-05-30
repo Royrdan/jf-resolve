@@ -47,7 +47,7 @@ class RDService:
         if re.search(r'\b(cam|camrip|hdcam|hdts|telesync|hdtc|screener|dvdscr)\b', f):
             return 0.5
             
-        if any(ind in f for ind in ["4k", "2160p", "2160", "uhd"]):
+        if any(ind in f for ind in ["4k", "2160p", "2160", "uhd", "ultra hd", "ultrahd", "ultra-hd"]):
             return 4.0
         if any(ind in f for ind in ["1440p", "1440"]):
             return 3.5
@@ -58,6 +58,17 @@ class RDService:
         if any(ind in f for ind in ["480p", "480"]):
             return 1.0
         return 0.0
+
+    _EXTRAS_PATTERN = re.compile(
+        r"(^|/)(featurettes?|extras?|bonus|samples?|trailers?|deleted scenes?|"
+        r"behind the scenes?|making of|interviews?|commentary)(/|\b)",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _is_extras_path(cls, file_path: str) -> bool:
+        """True if the file path is inside an extras/featurettes/sample folder."""
+        return bool(cls._EXTRAS_PATTERN.search(file_path))
 
     @staticmethod
     def _preferred_rank(quality: str) -> float:
@@ -250,6 +261,12 @@ class RDService:
                 if not re.search(ep_pattern, file_path):
                     continue
 
+                if self._is_extras_path(file_path):
+                    log_service.info(
+                        f"RD: skipping episode extra {files[file_idx].get('path')} (featurette/sample/extras)"
+                    )
+                    continue
+
                 q_rank = self._quality_rank(file_path)
 
                 # If requested quality is explicit and this file has a detectable quality, they must match
@@ -345,6 +362,13 @@ class RDService:
                     continue
 
                 file_path = files[file_idx].get("path", "").lower()
+
+                if self._is_extras_path(file_path):
+                    log_service.info(
+                        f"RD: skipping movie extra {files[file_idx].get('path')} (featurette/sample/extras)"
+                    )
+                    continue
+
                 q_rank = self._quality_rank(file_path)
 
                 # If requested quality is explicit and this file has a detectable quality, they must match
