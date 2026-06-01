@@ -60,8 +60,13 @@ class RDService:
         return 0.0
 
     _EXTRAS_PATTERN = re.compile(
-        r"(^|/)(featurettes?|extras?|bonus|samples?|trailers?|deleted scenes?|"
-        r"behind the scenes?|making of|interviews?|commentary)(/|\b)",
+        r"(?:^|[/._\-\s])("
+        r"featurettes?|extras?|bonus|samples?|trailers?|commentary|"
+        r"deleted[\s._\-]+scenes?|"
+        r"behind[\s._\-]+the[\s._\-]+scenes?|"
+        r"making[\s._\-]+of|"
+        r"interviews?"
+        r")(?:[/._\-\s]|$)",
         re.IGNORECASE,
     )
 
