@@ -542,11 +542,22 @@ class LibraryService:
             details = await self.tmdb.get_tv_details(item.tmdb_id)
             current_seasons = details.get("number_of_seasons", 0)
 
-            qualities = (
+            stored_qualities = (
                 json.loads(item.quality_versions)
                 if item.quality_versions
-                else ["1080p"]
+                else None
             )
+            # On force-regen, heal legacy ["auto"]/empty rows (old Jellyseerr
+            # path) to the user's configured quality versions so TV shows rebuild
+            # full quality sets the same way movies do. settings.get here is safe:
+            # the item isn't dirty yet, so no autoflush fires.
+            heal_qualities = force_regenerate and (
+                not stored_qualities or stored_qualities == ["auto"]
+            )
+            if heal_qualities:
+                qualities = await self.settings.get("quality_versions", ["1080p"])
+            else:
+                qualities = stored_qualities or ["1080p"]
             server_url = await self._get_stream_server_url()
             streams_per_quality = await self.settings.get("streams_per_quality", 2)
             folder_path = Path(item.folder_path)
@@ -564,6 +575,11 @@ class LibraryService:
                 # (greenlet_spawn error). _create_tv_strms updates last_season_checked
                 # to num_seasons internally at the end.
                 await self._create_tv_strms(item, details, qualities)
+                if heal_qualities:
+                    # Persist the resolved list now (after _create_tv_strms has
+                    # done its settings.get calls) so the legacy ["auto"] row is
+                    # healed in the DB and won't need re-healing on next regen.
+                    item.quality_versions = json.dumps(qualities)
                 await self.db.commit()
                 await self._trigger_jellyfin_scan()
                 log_service.info(f"Regenerated all STRM files for TV show: {item.title}")
