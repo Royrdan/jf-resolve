@@ -5,6 +5,7 @@ import re
 import time
 from datetime import datetime
 from typing import Optional
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -27,6 +28,20 @@ router = APIRouter(prefix="/api/stream", tags=["stream"])
 # Cache for resolved URLs: {key: (timestamp, url)}
 RESOLVE_CACHE = {}
 RESOLVE_CACHE_TTL = 3600  # 60 minutes
+
+# Matches a torrentio /resolve/ URL → captures (infohash, filename). Used to
+# convert the addon's volatile resolve URL into a stable RD direct link.
+_TORRENTIO_RESOLVE_RE = re.compile(
+    r"/resolve/[^/]+/[^/]+/([0-9a-fA-F]{40})/[^/]+/\d+/([^/?]+)"
+)
+
+
+def _parse_torrentio_url(url: str):
+    """Return (infohash, filename) for a torrentio resolve URL, else (None, None)."""
+    m = _TORRENTIO_RESOLVE_RE.search(url)
+    if not m:
+        return None, None
+    return m.group(1).lower(), unquote(m.group(2))
 
 
 @router.api_route("/resolve/{media_type}/{tmdb_id}", methods=["GET", "HEAD"])
@@ -266,6 +281,15 @@ async def resolve_stream(
         if not quality or quality == "auto":
             target_quality = await settings.get("series_preferred_quality", "1080p")
 
+        # Convert torrentio addon resolve URLs into stable real-debrid.com
+        # direct links so players survive mid-stream reconnects (no more 0:00
+        # freezes). Falls back to the raw addon URL when RD can't resolve it
+        # (not cached, no file match). Reuses the RD api key already loaded.
+        rd_resolve_enabled = await settings.get("rd_resolve_torrentio_enabled", True)
+        rd_converter = None
+        if rd_api_key_val and rd_resolve_enabled:
+            rd_converter = RDService(rd_api_key_val)
+
         # Build one flat, de-duplicated candidate list ordered as
         # requested-quality → fallback-qualities → rest. The validation-retry
         # loop below walks THIS list, so a dead link in a single-stream quality
@@ -355,21 +379,44 @@ async def resolve_stream(
                     )
 
                 try:
+                    # Convert a torrentio resolve URL into a stable RD direct
+                    # link. On success the player streams from real-debrid.com
+                    # directly (range-capable, reconnect-safe). On failure we
+                    # keep the addon URL and proceed as before.
+                    play_url = retry_stream_url
+                    if rd_converter is not None:
+                        infohash, fname = _parse_torrentio_url(retry_stream_url)
+                        if infohash:
+                            direct = await rd_converter.resolve_infohash(
+                                infohash, season, episode, filename_hint=fname
+                            )
+                            if direct:
+                                log_service.stream(
+                                    f"RD-converted infohash {infohash[:8]} for "
+                                    f"{state_key} → {direct[:80]}..."
+                                )
+                                play_url = direct
+                            else:
+                                log_service.info(
+                                    f"RD conversion unavailable for infohash "
+                                    f"{infohash[:8]}, using addon URL"
+                                )
+
                     skip_head = any(
-                        d in retry_stream_url
+                        d in play_url
                         for d in ("torrentio", "real-debrid", "elfhosted")
                     )
                     if skip_head:
                         log_service.info(
-                            f"Skipping HEAD for known blocking domain: {retry_stream_url}"
+                            f"Skipping HEAD for known blocking domain: {play_url}"
                         )
 
-                    resolved = retry_stream_url
+                    resolved = play_url
 
                     if not skip_head:
                         try:
                             log_service.info("Attempting HEAD request...")
-                            response = await client.head(retry_stream_url, timeout=8.0)
+                            response = await client.head(play_url, timeout=8.0)
                             log_service.info(
                                 f"HEAD response: {response.status_code} {response.url}"
                             )
@@ -384,7 +431,7 @@ async def resolve_stream(
 
                     if skip_head:
                         async with client.stream(
-                            "GET", retry_stream_url, timeout=8.0
+                            "GET", play_url, timeout=8.0
                         ) as response:
                             resolved = str(response.url)
                             log_service.info(f"GET response URL: {resolved}")
