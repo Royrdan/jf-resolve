@@ -18,6 +18,7 @@ from ..services.library_service import LibraryService
 from ..services.log_service import log_service
 from ..services.rd_service import RDService
 from ..services.settings_manager import SettingsManager
+from ..services.stream_validator import StreamValidator, ValidationPolicy
 from ..services.stremio_service import StremioService
 from ..services.tmdb_service import TMDBService
 
@@ -302,10 +303,38 @@ async def resolve_stream(
             f"Resolved {state_key} quality={quality} index={use_index} attempt={state.attempt_count} → {stream_url[:100]}..."
         )
 
-        # Resolve redirect chain with in-request retry on season-pack episode mismatch.
-        # Each retry selects the next stream index immediately rather than waiting for
-        # Jellyfin to make another request.
-        MAX_EPISODE_RETRIES = 5
+        # Build the playability validator from settings. When enabled, each
+        # resolved candidate is ffprobe'd and rejected (→ try next stream) if the
+        # link is dead, non-media, too short, or — optionally — an unplayable codec.
+        validation_enabled = await settings.get("stream_validation_enabled", True)
+        validator = None
+        if validation_enabled:
+            if StreamValidator.available():
+                policy = ValidationPolicy(
+                    min_duration_seconds=await settings.get("stream_min_duration_seconds", 180),
+                    codec_gating=await settings.get("stream_validation_codec_gating", False),
+                    video_allowlist=await settings.get(
+                        "stream_video_allowlist", list(ValidationPolicy().video_allowlist)
+                    ),
+                    audio_allowlist=await settings.get(
+                        "stream_audio_allowlist", list(ValidationPolicy().audio_allowlist)
+                    ),
+                    container_allowlist=await settings.get(
+                        "stream_container_allowlist", list(ValidationPolicy().container_allowlist)
+                    ),
+                    probe_timeout_seconds=await settings.get("stream_probe_timeout_seconds", 10),
+                )
+                validator = StreamValidator(policy)
+            else:
+                log_service.warning(
+                    "stream_validation_enabled but ffprobe is not installed — "
+                    "serving streams unvalidated"
+                )
+
+        # Resolve redirect chain with in-request retry on season-pack episode
+        # mismatch AND failed playability validation. Each retry selects the next
+        # stream index immediately rather than waiting for Jellyfin to re-request.
+        MAX_EPISODE_RETRIES = await settings.get("stream_max_retries", 8)
 
         final_url = None
         retry_stream_url = stream_url
@@ -389,7 +418,29 @@ async def resolve_stream(
                                 )
                                 continue
 
-                    # Correct episode (or movie/unknown) — accept this URL
+                    # Playability gate: probe the resolved file and reject dead
+                    # links, non-media, too-short, or unplayable-codec streams.
+                    if validator is not None:
+                        probe = await validator.validate(resolved)
+                        if not probe.ok:
+                            log_service.warning(
+                                f"Validation rejected stream (attempt {retry + 1}/"
+                                f"{MAX_EPISODE_RETRIES + 1}) for {state_key}: "
+                                f"{probe.reason}"
+                                + (
+                                    " — trying next stream."
+                                    if retry < MAX_EPISODE_RETRIES
+                                    else " — retries exhausted."
+                                )
+                            )
+                            continue
+                        log_service.stream(
+                            f"Validation passed for {state_key}: "
+                            f"fmt={probe.format_name} v={probe.video_codec} "
+                            f"a={probe.audio_codec} dur={probe.duration}"
+                        )
+
+                    # Correct episode (or movie/unknown) and playable — accept this URL
                     final_url = resolved
                     break
 
