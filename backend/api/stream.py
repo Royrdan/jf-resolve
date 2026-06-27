@@ -312,16 +312,9 @@ async def resolve_stream(
             if StreamValidator.available():
                 policy = ValidationPolicy(
                     min_duration_seconds=await settings.get("stream_min_duration_seconds", 180),
-                    codec_gating=await settings.get("stream_validation_codec_gating", False),
-                    video_allowlist=await settings.get(
-                        "stream_video_allowlist", list(ValidationPolicy().video_allowlist)
-                    ),
-                    audio_allowlist=await settings.get(
-                        "stream_audio_allowlist", list(ValidationPolicy().audio_allowlist)
-                    ),
-                    container_allowlist=await settings.get(
-                        "stream_container_allowlist", list(ValidationPolicy().container_allowlist)
-                    ),
+                    video_denylist=await settings.get("stream_video_denylist", []),
+                    audio_denylist=await settings.get("stream_audio_denylist", []),
+                    container_denylist=await settings.get("stream_container_denylist", []),
                     probe_timeout_seconds=await settings.get("stream_probe_timeout_seconds", 10),
                 )
                 validator = StreamValidator(policy)

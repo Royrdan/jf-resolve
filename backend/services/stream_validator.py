@@ -14,11 +14,13 @@ from typing import List, Optional
 
 from .log_service import log_service
 
-# Codecs/containers that direct-play reliably on most clients. Only enforced
-# when codec gating is explicitly enabled; liveness + duration always apply.
-DEFAULT_VIDEO_ALLOWLIST = ["h264", "hevc", "mpeg4", "vp9", "mpeg2video"]
-DEFAULT_AUDIO_ALLOWLIST = ["aac", "ac3", "eac3", "mp3", "flac", "opus", "dts"]
-DEFAULT_CONTAINER_ALLOWLIST = ["mov", "mp4", "m4a", "matroska", "webm", "mpegts", "avi"]
+# Codecs/containers known to fail playback. Empty by default — the NVIDIA
+# Shield (and most clients) direct-play almost everything, so we only block
+# specific types that are actually reported as unplayable. Add entries here as
+# bad file types surface. Liveness + min-duration checks always apply.
+DEFAULT_VIDEO_DENYLIST: List[str] = []
+DEFAULT_AUDIO_DENYLIST: List[str] = []
+DEFAULT_CONTAINER_DENYLIST: List[str] = []
 
 
 @dataclass
@@ -38,10 +40,9 @@ class ValidationPolicy:
     """Tunable rules applied to a probe."""
 
     min_duration_seconds: int = 180
-    codec_gating: bool = False
-    video_allowlist: List[str] = field(default_factory=lambda: list(DEFAULT_VIDEO_ALLOWLIST))
-    audio_allowlist: List[str] = field(default_factory=lambda: list(DEFAULT_AUDIO_ALLOWLIST))
-    container_allowlist: List[str] = field(default_factory=lambda: list(DEFAULT_CONTAINER_ALLOWLIST))
+    video_denylist: List[str] = field(default_factory=lambda: list(DEFAULT_VIDEO_DENYLIST))
+    audio_denylist: List[str] = field(default_factory=lambda: list(DEFAULT_AUDIO_DENYLIST))
+    container_denylist: List[str] = field(default_factory=lambda: list(DEFAULT_CONTAINER_DENYLIST))
     probe_timeout_seconds: int = 10
 
 
@@ -152,30 +153,20 @@ class StreamValidator:
             result.reason = f"too_short ({duration:.0f}s < {min_dur}s)"
             return result
 
-        # Optional client-aware codec/container gating.
-        if self.policy.codec_gating:
-            containers = set((format_name or "").split(","))
-            if self.policy.container_allowlist and not (
-                containers & set(self.policy.container_allowlist)
-            ):
-                result.ok = False
-                result.reason = f"container_not_allowed ({format_name})"
-                return result
-            if (
-                self.policy.video_allowlist
-                and video_codec
-                and video_codec not in self.policy.video_allowlist
-            ):
-                result.ok = False
-                result.reason = f"video_codec_not_allowed ({video_codec})"
-                return result
-            if (
-                self.policy.audio_allowlist
-                and audio_codec
-                and audio_codec not in self.policy.audio_allowlist
-            ):
-                result.ok = False
-                result.reason = f"audio_codec_not_allowed ({audio_codec})"
-                return result
+        # Codec/container denylist — empty by default; rejects only types that
+        # have been reported as unplayable (the Shield handles almost everything).
+        containers = set((format_name or "").split(","))
+        if containers & set(self.policy.container_denylist):
+            result.ok = False
+            result.reason = f"container_denied ({format_name})"
+            return result
+        if video_codec and video_codec in self.policy.video_denylist:
+            result.ok = False
+            result.reason = f"video_codec_denied ({video_codec})"
+            return result
+        if audio_codec and audio_codec in self.policy.audio_denylist:
+            result.ok = False
+            result.reason = f"audio_codec_denied ({audio_codec})"
+            return result
 
         return result
