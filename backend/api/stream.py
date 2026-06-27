@@ -257,16 +257,6 @@ async def resolve_stream(
         # However, to be safe, let's keep the last used instance or create a new one.
         stremio = StremioService(manifest_url) 
 
-        # Stop Index Increment Loop
-        if use_index >= len(streams) and len(streams) > 0:
-            log_service.info(
-                f"Index {use_index} out of range (max {len(streams)-1}). Resetting to 0."
-            )
-            use_index = 0
-            # Update state to reset
-            state.current_index = 0
-            await failover.update_state(state)
-
         fallback_enabled = await settings.get("quality_fallback_enabled", True)
         fallback_order = await settings.get(
             "quality_fallback_order", ["1080p", "720p", "4k", "480p"]
@@ -276,17 +266,20 @@ async def resolve_stream(
         if not quality or quality == "auto":
             target_quality = await settings.get("series_preferred_quality", "1080p")
 
-        stream_url = await stremio.select_stream(
+        # Build one flat, de-duplicated candidate list ordered as
+        # requested-quality → fallback-qualities → rest. The validation-retry
+        # loop below walks THIS list, so a dead link in a single-stream quality
+        # bucket falls through to other qualities instead of dead-ending.
+        candidates = stremio.ordered_candidates(
             streams,
             target_quality,
-            use_index,
             fallback_enabled,
             fallback_order,
             season=season,
             episode=episode,
         )
 
-        if not stream_url:
+        if not candidates:
             log_service.error(
                 f"Stream selection failed for {state_key}. Quality requested: {target_quality}, "
                 f"Index: {use_index}, Total streams: {len(streams)}"
@@ -298,6 +291,17 @@ async def resolve_stream(
             raise HTTPException(
                 status_code=404, detail="No suitable stream quality found"
             )
+
+        # Bound the failover start index to the candidate list.
+        if use_index >= len(candidates):
+            log_service.info(
+                f"Index {use_index} out of range (max {len(candidates)-1}). Resetting to 0."
+            )
+            use_index = 0
+            state.current_index = 0
+            await failover.update_state(state)
+
+        stream_url = candidates[use_index]
 
         log_service.stream(
             f"Resolved {state_key} quality={quality} index={use_index} attempt={state.attempt_count} → {stream_url[:100]}..."
@@ -337,24 +341,17 @@ async def resolve_stream(
             for retry in range(MAX_EPISODE_RETRIES + 1):
                 if retry > 0:
                     retry_index += 1
-                    next_url = await stremio.select_stream(
-                        streams,
-                        target_quality,
-                        retry_index,
-                        fallback_enabled,
-                        fallback_order,
-                        season=season,
-                        episode=episode,
-                    )
-                    if not next_url or next_url == retry_stream_url:
+                    if retry_index >= len(candidates):
                         log_service.warning(
-                            f"No new stream at index {retry_index} for {state_key}, stopping retries."
+                            f"No more candidates at index {retry_index} for {state_key} "
+                            f"({len(candidates)} total across all qualities), stopping retries."
                         )
                         break
-                    retry_stream_url = next_url
+                    retry_stream_url = candidates[retry_index]
                     log_service.info(
-                        f"Episode mismatch retry {retry}/{MAX_EPISODE_RETRIES}: "
-                        f"trying stream index {retry_index} → {retry_stream_url[:80]}..."
+                        f"Validation/mismatch retry {retry}/{MAX_EPISODE_RETRIES}: "
+                        f"trying candidate index {retry_index} (cross-quality) → "
+                        f"{retry_stream_url[:80]}..."
                     )
 
                 try:

@@ -425,6 +425,69 @@ class StremioService:
             )
         return episode_specific + season_packs
 
+    def ordered_candidates(
+        self,
+        streams: List[Dict],
+        quality: str,
+        fallback_enabled: bool = True,
+        fallback_order: List[str] = None,
+        season: Optional[int] = None,
+        episode: Optional[int] = None,
+    ) -> List[str]:
+        """
+        Build a single flat, de-duplicated list of candidate stream URLs in
+        resolution-preference order:
+
+            requested quality (episode-specific first) →
+            each fallback quality in order (episode-specific first) →
+            any remaining streams (unknown quality bucket)
+
+        The resolver's validation-retry loop walks THIS list, so when every
+        stream in the requested quality fails (e.g. a dead Real-Debrid link),
+        retries fall through to other qualities instead of dead-ending on a
+        single-stream quality bucket. When fallback is disabled, only the
+        requested quality's streams are returned.
+        """
+        if not streams:
+            return []
+
+        if fallback_order is None:
+            fallback_order = ["1080p", "720p", "4k", "480p"]
+
+        if fallback_enabled:
+            ordered_qualities = [quality] + [
+                q for q in fallback_order if q != quality
+            ]
+        else:
+            ordered_qualities = [quality]
+
+        seen = set()
+        urls: List[str] = []
+
+        for q in ordered_qualities:
+            q_streams = [s for s in streams if self.detect_quality(s) == q]
+            if season is not None and episode is not None and q_streams:
+                q_streams = self._sort_by_episode_specificity(
+                    q_streams, season, episode
+                )
+            for s in q_streams:
+                url = s.get("url")
+                if url and url not in seen:
+                    seen.add(url)
+                    urls.append(url)
+
+        # Catch-all: include any streams whose detected quality wasn't in the
+        # ordered list (only when fallback is enabled — better a wrong-quality
+        # playable stream than nothing).
+        if fallback_enabled:
+            for s in streams:
+                url = s.get("url")
+                if url and url not in seen:
+                    seen.add(url)
+                    urls.append(url)
+
+        return urls
+
     async def select_stream(
         self,
         streams: List[Dict],
