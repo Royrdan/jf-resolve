@@ -378,6 +378,7 @@ class RDService:
         episode: int,
         preferred_quality: str = "1080p",
         use_index: int = 0,
+        strict_quality: bool = False,
     ) -> Optional[str]:
         """
         Search the user's RD library for a specific TV episode.
@@ -451,9 +452,17 @@ class RDService:
 
                 q_rank = self._quality_rank(file_path)
 
-                # Quality is a PREFERENCE, not a hard gate: score by closeness to
-                # the requested quality so the preferred version wins when present,
-                # but a 720p-only episode is still served rather than 404'd.
+                # On an EXPLICIT quality request, hard-skip mismatches (the caller
+                # asked for a specific quality). On `auto`, quality is only a
+                # preference: keep mismatches as lower-scored fallbacks so a
+                # 720p-only episode still plays instead of 404'ing.
+                if strict_quality and pref_rank > 0 and q_rank > 0 and q_rank != pref_rank:
+                    log_service.info(
+                        f"RD: skipping episode {files[file_idx].get('path')} "
+                        f"(q_rank={q_rank}) — explicit quality request (pref_rank={pref_rank})"
+                    )
+                    continue
+
                 score = 10 - abs(q_rank - pref_rank)
 
                 log_service.info(
@@ -503,6 +512,7 @@ class RDService:
         year: Optional[int],
         preferred_quality: str = "1080p",
         use_index: int = 0,
+        strict_quality: bool = False,
     ) -> Optional[str]:
         """
         Search the user's RD library for a movie file.
@@ -564,7 +574,14 @@ class RDService:
 
                 q_rank = self._quality_rank(file_path)
 
-                # Quality is a PREFERENCE, not a hard gate (see find_episode_stream).
+                # Strict on explicit quality, preference on auto (see find_episode_stream).
+                if strict_quality and pref_rank > 0 and q_rank > 0 and q_rank != pref_rank:
+                    log_service.info(
+                        f"RD: skipping movie {files[file_idx].get('path')} "
+                        f"(q_rank={q_rank}) — explicit quality request (pref_rank={pref_rank})"
+                    )
+                    continue
+
                 score = 10 - abs(q_rank - pref_rank)
 
                 log_service.info(

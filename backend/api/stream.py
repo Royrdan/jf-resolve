@@ -180,6 +180,7 @@ async def resolve_stream(
 
         if rd_api_key_val and rd_direct_enabled:
             rd_target_quality = quality
+            rd_strict_quality = bool(quality and quality.lower() != "auto")
             if not quality or quality == "auto":
                 rd_target_quality = await settings.get("series_preferred_quality", "1080p")
 
@@ -190,11 +191,13 @@ async def resolve_stream(
 
                     if media_type == "tv":
                         rd_url = await rd.find_episode_stream(
-                            media_title, season, episode, rd_target_quality, use_index
+                            media_title, season, episode, rd_target_quality,
+                            use_index, strict_quality=rd_strict_quality,
                         )
                     else:
                         rd_url = await rd.find_movie_stream(
-                            media_title, media_year, rd_target_quality, use_index
+                            media_title, media_year, rd_target_quality,
+                            use_index, strict_quality=rd_strict_quality,
                         )
 
                     if rd_url:
