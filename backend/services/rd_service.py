@@ -471,14 +471,21 @@ class RDService:
         if matches:
             # Sort descending by score
             matches.sort(key=lambda x: x[0], reverse=True)
-            
-            if use_index < len(matches):
-                match_score, match_url, match_path = matches[use_index]
-                log_service.info(f"RD: unrestricting episode match at index {use_index} (score={match_score}): {match_path}")
-                return await self.unrestrict_link(match_url)
-            else:
-                log_service.info(f"RD: use_index {use_index} out of bounds (found {len(matches)} matches)")
-                return None
+
+            # The failover index walks the (potentially long) torrentio candidate
+            # list; the RD library usually has only 1-2 matches for an episode.
+            # Clamp rather than return None, so a climbing failover counter never
+            # abandons a file we DO have downloaded (which would 404 through to
+            # torrentio). RD library is the canonical best source — always serve it.
+            idx = use_index if use_index < len(matches) else len(matches) - 1
+            if idx != use_index:
+                log_service.info(
+                    f"RD: use_index {use_index} >= {len(matches)} match(es); "
+                    f"clamping to best available (index {idx})"
+                )
+            match_score, match_url, match_path = matches[idx]
+            log_service.info(f"RD: unrestricting episode match at index {idx} (score={match_score}): {match_path}")
+            return await self.unrestrict_link(match_url)
 
         log_service.info(
             f"RD: no episode file for S{season:02d}E{episode:02d} "
@@ -573,14 +580,18 @@ class RDService:
         if matches:
             # Sort descending by score
             matches.sort(key=lambda x: x[0], reverse=True)
-            
-            if use_index < len(matches):
-                match_score, match_url, match_path = matches[use_index]
-                log_service.info(f"RD: unrestricting movie match at index {use_index} (score={match_score}): {match_path}")
-                return await self.unrestrict_link(match_url)
-            else:
-                log_service.info(f"RD: use_index {use_index} out of bounds (found {len(matches)} matches)")
-                return None
+
+            # Clamp (see find_episode_stream) — a climbing failover index must not
+            # abandon a movie we have downloaded in RD.
+            idx = use_index if use_index < len(matches) else len(matches) - 1
+            if idx != use_index:
+                log_service.info(
+                    f"RD: use_index {use_index} >= {len(matches)} match(es); "
+                    f"clamping to best available (index {idx})"
+                )
+            match_score, match_url, match_path = matches[idx]
+            log_service.info(f"RD: unrestricting movie match at index {idx} (score={match_score}): {match_path}")
+            return await self.unrestrict_link(match_url)
 
         log_service.info(f"RD: no suitable movie file found for '{movie_title}'")
         return None
