@@ -477,15 +477,24 @@ class RDService:
             # Clamp rather than return None, so a climbing failover counter never
             # abandons a file we DO have downloaded (which would 404 through to
             # torrentio). RD library is the canonical best source — always serve it.
-            idx = use_index if use_index < len(matches) else len(matches) - 1
-            if idx != use_index:
+            start = use_index if use_index < len(matches) else len(matches) - 1
+            if start != use_index:
                 log_service.info(
                     f"RD: use_index {use_index} >= {len(matches)} match(es); "
-                    f"clamping to best available (index {idx})"
+                    f"clamping to best available (index {start})"
                 )
-            match_score, match_url, match_path = matches[idx]
-            log_service.info(f"RD: unrestricting episode match at index {idx} (score={match_score}): {match_path}")
-            return await self.unrestrict_link(match_url)
+            # Try the chosen match first, then any others (e.g. a duplicate library
+            # copy of the same pack) so one dead RD link (hoster_unavailable / 503)
+            # doesn't sink an episode we actually have another copy of.
+            order = [start] + [i for i in range(len(matches)) if i != start]
+            for i in order:
+                match_score, match_url, match_path = matches[i]
+                log_service.info(f"RD: unrestricting episode match at index {i} (score={match_score}): {match_path}")
+                url = await self.unrestrict_link(match_url)
+                if url:
+                    return url
+                log_service.info(f"RD: unrestrict failed for index {i}, trying next match")
+            return None
 
         log_service.info(
             f"RD: no episode file for S{season:02d}E{episode:02d} "
@@ -583,15 +592,21 @@ class RDService:
 
             # Clamp (see find_episode_stream) — a climbing failover index must not
             # abandon a movie we have downloaded in RD.
-            idx = use_index if use_index < len(matches) else len(matches) - 1
-            if idx != use_index:
+            start = use_index if use_index < len(matches) else len(matches) - 1
+            if start != use_index:
                 log_service.info(
                     f"RD: use_index {use_index} >= {len(matches)} match(es); "
-                    f"clamping to best available (index {idx})"
+                    f"clamping to best available (index {start})"
                 )
-            match_score, match_url, match_path = matches[idx]
-            log_service.info(f"RD: unrestricting movie match at index {idx} (score={match_score}): {match_path}")
-            return await self.unrestrict_link(match_url)
+            order = [start] + [i for i in range(len(matches)) if i != start]
+            for i in order:
+                match_score, match_url, match_path = matches[i]
+                log_service.info(f"RD: unrestricting movie match at index {i} (score={match_score}): {match_path}")
+                url = await self.unrestrict_link(match_url)
+                if url:
+                    return url
+                log_service.info(f"RD: unrestrict failed for index {i}, trying next match")
+            return None
 
         log_service.info(f"RD: no suitable movie file found for '{movie_title}'")
         return None
