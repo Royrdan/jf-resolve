@@ -451,14 +451,9 @@ class RDService:
 
                 q_rank = self._quality_rank(file_path)
 
-                # If requested quality is explicit and this file has a detectable quality, they must match
-                if pref_rank > 0 and q_rank > 0 and q_rank != pref_rank:
-                    log_service.info(
-                        f"RD: skipping episode {files[file_idx].get('path')} "
-                        f"(q_rank={q_rank}) as it does not match requested quality (pref_rank={pref_rank})"
-                    )
-                    continue
-
+                # Quality is a PREFERENCE, not a hard gate: score by closeness to
+                # the requested quality so the preferred version wins when present,
+                # but a 720p-only episode is still served rather than 404'd.
                 score = 10 - abs(q_rank - pref_rank)
 
                 log_service.info(
@@ -569,14 +564,7 @@ class RDService:
 
                 q_rank = self._quality_rank(file_path)
 
-                # If requested quality is explicit and this file has a detectable quality, they must match
-                if pref_rank > 0 and q_rank > 0 and q_rank != pref_rank:
-                    log_service.info(
-                        f"RD: skipping movie {files[file_idx].get('path')} "
-                        f"(q_rank={q_rank}) as it does not match requested quality (pref_rank={pref_rank})"
-                    )
-                    continue
-
+                # Quality is a PREFERENCE, not a hard gate (see find_episode_stream).
                 score = 10 - abs(q_rank - pref_rank)
 
                 log_service.info(
