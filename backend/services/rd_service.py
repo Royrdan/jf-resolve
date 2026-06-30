@@ -254,9 +254,7 @@ class RDService:
 
         # 1. Episode pattern (TV: season packs and single episodes)
         if season is not None and episode is not None:
-            ep_pat = re.compile(
-                rf"s{season:02d}[\s._\-]*e{episode:02d}", re.IGNORECASE
-            )
+            ep_pat = self._episode_pattern(season, episode)
             for f, ln in candidates:
                 if ep_pat.search(f.get("path", "")):
                     return ln
@@ -345,9 +343,29 @@ class RDService:
         norm = self._normalise(torrent_name)
         return all(w in norm for w in title_words)
 
-    def _contains_season(self, torrent_name: str, season: int) -> bool:
-        norm = self._normalise(torrent_name).replace(" ", "")
-        return bool(re.search(rf"s{season:02d}", norm))
+    def _season_in_name(self, torrent_name: str, season: int) -> bool:
+        """True if the torrent name references the requested season — including
+        multi-season range packs (S01-13, Seasons 1-13) and complete-series packs."""
+        name = torrent_name.lower()
+        if "complete" in name:
+            return True
+        # Season ranges: S01-13, S01-S13, Season(s) 1-13, 1 to 13
+        for m in re.finditer(
+            r"s(?:eason)?s?\s*0*(\d{1,2})\s*(?:-|–|to)+\s*s?(?:eason)?\s*0*(\d{1,2})",
+            name,
+        ):
+            if int(m.group(1)) <= season <= int(m.group(2)):
+                return True
+        # Single season: S08, Season 8, Season08
+        return bool(re.search(rf"s(?:eason)?\s*0*{season}(?!\d)", name))
+
+    @staticmethod
+    def _episode_pattern(season: int, episode: int) -> "re.Pattern[str]":
+        """Match an episode reference in SxxExx, SxEx, or NxNN form (e.g. 8x06)."""
+        return re.compile(
+            rf"(?:s0*{season}[\s._\-]*e0*{episode}|(?<!\d){season}x0*{episode})(?!\d)",
+            re.IGNORECASE,
+        )
 
     # ------------------------------------------------------------------
     # Public lookup methods
@@ -373,7 +391,7 @@ class RDService:
 
         Returns a direct CDN download URL or None.
         """
-        ep_pattern = rf"s{season:02d}e{episode:02d}"
+        ep_re = self._episode_pattern(season, episode)
         title_words = [w for w in self._normalise(show_title).split() if len(w) > 1]
         pref_rank = self._preferred_rank(preferred_quality)
 
@@ -385,7 +403,7 @@ class RDService:
         candidates = [
             t for t in torrents
             if self._title_matches(t.get("filename", ""), title_words)
-            and self._contains_season(t.get("filename", ""), season)
+            and self._season_in_name(t.get("filename", ""), season)
         ]
 
         if not candidates:
@@ -422,7 +440,7 @@ class RDService:
 
                 file_path = files[file_idx].get("path", "").lower()
 
-                if not re.search(ep_pattern, file_path):
+                if not ep_re.search(file_path):
                     continue
 
                 if self._is_extras_path(file_path):
