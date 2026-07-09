@@ -67,6 +67,43 @@ class TMDBService:
         """Get top rated content"""
         return await self._request(f"{media_type}/top_rated", {"page": page})
 
+    async def discover_by_provider(
+        self,
+        media_type: str,
+        provider_ids: list,
+        region: str = "AU",
+        released_only: bool = True,
+        english_only: bool = True,
+        page: int = 1,
+    ) -> Dict:
+        """
+        Discover movies/TV available on specific streaming providers in a region
+        (e.g. Netflix, Stan, Disney+ in AU), most-popular first.
+
+        released_only: movies must have a digital/physical release on/before today
+        (excludes titles still only in cinemas / unreleased); TV must have aired.
+        english_only: keep original-language English (excludes foreign + anime).
+        """
+        import datetime
+
+        params = {
+            "with_watch_providers": "|".join(str(p) for p in provider_ids),
+            "watch_region": region,
+            "with_watch_monetization_types": "flatrate",
+            "sort_by": "popularity.desc",
+            "page": page,
+        }
+        if english_only:
+            params["with_original_language"] = "en"
+        if released_only:
+            today = datetime.date.today().isoformat()
+            if media_type == "movie":
+                params["release_date.lte"] = today
+                params["with_release_type"] = "4|5"  # digital | physical
+            else:
+                params["first_air_date.lte"] = today
+        return await self._request(f"discover/{media_type}", params)
+
     async def get_movie_details(self, tmdb_id: int) -> Dict:
         """Get movie details"""
         return await self._request(

@@ -81,6 +81,27 @@ class PopulateService:
                     items_with_type = [
                         (item, "movie") for item in movie_top.get("results", [])
                     ] + [(item, "tv") for item in tv_top.get("results", [])]
+                elif source == "providers":
+                    # Seed from popular streaming providers (Netflix/Stan/Disney+/
+                    # Prime/... in a region), most-popular first, English-only,
+                    # and (per filter_unreleased) only actually-released titles.
+                    provider_ids = await self.settings.get(
+                        "populate_providers", [8, 21, 337, 119, 350, 531]
+                    )
+                    region = await self.settings.get("populate_watch_region", "AU")
+                    released_only = await self.settings.get("filter_unreleased", True)
+                    pages = int(
+                        await self.settings.get("populate_provider_pages", 3) or 3
+                    )
+                    if provider_ids:
+                        for mt in ("movie", "tv"):
+                            for page in range(1, pages + 1):
+                                res = await self.tmdb.discover_by_provider(
+                                    mt, provider_ids, region, released_only, True, page
+                                )
+                                items_with_type += [
+                                    (item, mt) for item in res.get("results", [])
+                                ]
 
                 # Process items with their media types
                 for item_data, media_type in items_with_type:
