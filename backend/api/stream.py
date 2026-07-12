@@ -5,7 +5,7 @@ import re
 import time
 from datetime import datetime
 from typing import Optional
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -20,10 +20,29 @@ from ..services.log_service import log_service
 from ..services.rd_service import RDService
 from ..services.settings_manager import SettingsManager
 from ..services.stream_validator import StreamValidator, ValidationPolicy
-from ..services.stremio_service import StremioService
+from ..services.stremio_service import StremioService, CAM_PATTERN
 from ..services.tmdb_service import TMDBService
 
 router = APIRouter(prefix="/api/stream", tags=["stream"])
+
+# Explicit foreign-DUB filename markers. These indicate the ORIGINAL audio was
+# replaced with a foreign dub (unwatchable in English). Deliberately does NOT
+# match *SUBBED* tags (e.g. PLSUBBED) — a subbed release keeps the original
+# English audio with foreign subtitles, which is fine. Used as a ground-truth
+# check on the RESOLVED filename, where ffprobe language tags are unreliable
+# (many dubs ship untagged as 'und').
+FOREIGN_DUB_PATTERN = re.compile(
+    r'\b(dubbing|dubbed|dublado|dublaj|dublagem|pldub|dubpl|lektor|'
+    r'multidub|mdub|rusdub|itadub|castellano|latino)\b'
+)
+
+
+def _filename_from_url(url: str) -> str:
+    """Best-effort decoded filename from a resolved stream URL (lowercased)."""
+    try:
+        return unquote(urlparse(url).path).rsplit("/", 1)[-1].lower()
+    except Exception:
+        return ""
 
 # Cache for resolved URLs: {key: (timestamp, url)}
 RESOLVE_CACHE = {}
@@ -414,6 +433,10 @@ async def resolve_stream(
         final_url = None
         retry_stream_url = stream_url
         retry_index = use_index
+        # Set when a candidate is rejected specifically for being a cam-tier or
+        # foreign-dub source, so the exhausted-retries fallback 404s instead of
+        # serving one of those (better "unavailable" than a camcorder/dub).
+        saw_unacceptable = False
 
         async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
             for retry in range(MAX_EPISODE_RETRIES + 1):
@@ -509,6 +532,34 @@ async def resolve_stream(
                                 )
                                 continue
 
+                    # Ground-truth filename gate. The torrentio title was
+                    # already cam-filtered, but rd_converter may resolve the
+                    # infohash to a DIFFERENT file inside the torrent (e.g. a
+                    # Polish DCP-rip dub). Re-check the ACTUAL resolved filename
+                    # for cam-tier markers and foreign dubs — this is the only
+                    # reliable signal for untagged dubs that ffprobe reports as
+                    # 'und'.
+                    resolved_name = _filename_from_url(resolved)
+                    if resolved_name:
+                        if block_cam and CAM_PATTERN.search(resolved_name):
+                            saw_unacceptable = True
+                            log_service.warning(
+                                f"Resolved file is cam-tier "
+                                f"({resolved_name[:80]}) for {state_key} "
+                                f"(attempt {retry + 1}/{MAX_EPISODE_RETRIES + 1})"
+                                + (" — trying next stream." if retry < MAX_EPISODE_RETRIES else " — retries exhausted.")
+                            )
+                            continue
+                        if prefer_english_audio and FOREIGN_DUB_PATTERN.search(resolved_name):
+                            saw_unacceptable = True
+                            log_service.warning(
+                                f"Resolved file is a foreign dub "
+                                f"({resolved_name[:80]}) for {state_key} "
+                                f"(attempt {retry + 1}/{MAX_EPISODE_RETRIES + 1})"
+                                + (" — trying next stream." if retry < MAX_EPISODE_RETRIES else " — retries exhausted.")
+                            )
+                            continue
+
                     # Playability gate: probe the resolved file and reject dead
                     # links, non-media, too-short, or unplayable-codec streams.
                     if validator is not None:
@@ -545,6 +596,17 @@ async def resolve_stream(
 
         if final_url:
             RESOLVE_CACHE[cache_key] = (time.time(), final_url)
+        elif saw_unacceptable:
+            # Every remaining candidate was a cam-tier or foreign-dub source.
+            # Refuse rather than serve one — Jellyfin shows "unavailable".
+            log_service.warning(
+                f"All acceptable candidates exhausted for {state_key} — only "
+                f"cam-tier/foreign-dub sources remain. Returning 404."
+            )
+            raise HTTPException(
+                status_code=404,
+                detail="Only cam-tier or foreign-dub sources available (blocked)",
+            )
         else:
             # All retries exhausted — serve the last resolved stream URL as a fallback
             final_url = retry_stream_url
