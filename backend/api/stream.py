@@ -184,6 +184,33 @@ async def resolve_stream(
         # Stremio addon fallback below.
         block_cam = await settings.get("block_cam", True)
 
+        # Build the ffprobe validator ONCE, up front, so the same playability +
+        # language policy governs BOTH the RD library lookup and the Stremio
+        # candidates below. When prefer_english_audio is on (default), a source
+        # whose audio is an explicit foreign-only dub is rejected and the
+        # resolver falls through to an English/original-audio source.
+        prefer_english_audio = await settings.get("prefer_english_audio", True)
+        preferred_audio_langs = await settings.get("preferred_audio_langs", ["eng"])
+        validation_enabled = await settings.get("stream_validation_enabled", True)
+        validator = None
+        if validation_enabled:
+            if StreamValidator.available():
+                policy = ValidationPolicy(
+                    min_duration_seconds=await settings.get("stream_min_duration_seconds", 180),
+                    video_denylist=await settings.get("stream_video_denylist", []),
+                    audio_denylist=await settings.get("stream_audio_denylist", []),
+                    container_denylist=await settings.get("stream_container_denylist", []),
+                    probe_timeout_seconds=await settings.get("stream_probe_timeout_seconds", 10),
+                    preferred_audio_langs=preferred_audio_langs,
+                    require_preferred_audio=prefer_english_audio,
+                )
+                validator = StreamValidator(policy)
+            else:
+                log_service.warning(
+                    "stream_validation_enabled but ffprobe is not installed — "
+                    "serving streams unvalidated"
+                )
+
         if rd_api_key_val and rd_direct_enabled:
             rd_target_quality = quality
             rd_strict_quality = bool(quality and quality.lower() != "auto")
@@ -207,6 +234,19 @@ async def resolve_stream(
                             use_index, strict_quality=rd_strict_quality,
                             block_cam=block_cam,
                         )
+
+                    # Probe the RD library hit through the shared validator so
+                    # the language gate (and playability) applies here too — this
+                    # path bypasses the Stremio validation loop below. A foreign
+                    # dub is rejected → fall through to the Stremio addons.
+                    if rd_url and validator is not None:
+                        rd_probe = await validator.validate(rd_url)
+                        if not rd_probe.ok:
+                            log_service.info(
+                                f"RD direct: match rejected ({rd_probe.reason}) "
+                                f"for {state_key} — falling back to Stremio addons"
+                            )
+                            rd_url = None
 
                     if rd_url:
                         log_service.stream(
@@ -363,26 +403,8 @@ async def resolve_stream(
             f"Resolved {state_key} quality={quality} index={use_index} attempt={state.attempt_count} → {stream_url[:100]}..."
         )
 
-        # Build the playability validator from settings. When enabled, each
-        # resolved candidate is ffprobe'd and rejected (→ try next stream) if the
-        # link is dead, non-media, too short, or — optionally — an unplayable codec.
-        validation_enabled = await settings.get("stream_validation_enabled", True)
-        validator = None
-        if validation_enabled:
-            if StreamValidator.available():
-                policy = ValidationPolicy(
-                    min_duration_seconds=await settings.get("stream_min_duration_seconds", 180),
-                    video_denylist=await settings.get("stream_video_denylist", []),
-                    audio_denylist=await settings.get("stream_audio_denylist", []),
-                    container_denylist=await settings.get("stream_container_denylist", []),
-                    probe_timeout_seconds=await settings.get("stream_probe_timeout_seconds", 10),
-                )
-                validator = StreamValidator(policy)
-            else:
-                log_service.warning(
-                    "stream_validation_enabled but ffprobe is not installed — "
-                    "serving streams unvalidated"
-                )
+        # The ffprobe validator (playability + language gate) was built once up
+        # front and is reused here for the Stremio candidate loop.
 
         # Resolve redirect chain with in-request retry on season-pack episode
         # mismatch AND failed playability validation. Each retry selects the next
@@ -506,7 +528,8 @@ async def resolve_stream(
                         log_service.stream(
                             f"Validation passed for {state_key}: "
                             f"fmt={probe.format_name} v={probe.video_codec} "
-                            f"a={probe.audio_codec} dur={probe.duration}"
+                            f"a={probe.audio_codec} langs={probe.audio_langs} "
+                            f"subs={probe.sub_langs} dur={probe.duration}"
                         )
 
                     # Correct episode (or movie/unknown) and playable — accept this URL

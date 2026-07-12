@@ -626,6 +626,29 @@
                         </span>
                     </label>
                 </div>
+
+                <div class="form-control">
+                    <label class="label cursor-pointer">
+                        <span class="label-text font-semibold"
+                            >Prefer English audio (reject foreign dubs)</span
+                        >
+                        <input
+                            type="checkbox"
+                            x-model="settings.prefer_english_audio"
+                            class="checkbox checkbox-primary"
+                        />
+                    </label>
+                    <label class="label">
+                        <span class="label-text-alt opacity-70">
+                            Inspects each source's actual audio tracks (ffprobe)
+                            and skips any whose audio is a foreign-only dub (e.g.
+                            Polish/Russian), falling through to an
+                            English/original-audio source. Untagged, English, and
+                            multi-language tracks always pass, so subbed releases
+                            (original audio + foreign subtitles) are kept.
+                        </span>
+                    </label>
+                </div>
             </div>
         </div>
     </div>
@@ -1337,6 +1360,8 @@
                     this.settings.quality_fallback_enabled = true;
                 if (this.settings.block_cam === undefined)
                     this.settings.block_cam = true;
+                if (this.settings.prefer_english_audio === undefined)
+                    this.settings.prefer_english_audio = true;
                 if (!this.settings.failover_grace_seconds)
                     this.settings.failover_grace_seconds = 45;
                 if (!this.settings.failover_window_seconds)

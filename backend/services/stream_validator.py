@@ -23,6 +23,21 @@ DEFAULT_AUDIO_DENYLIST: List[str] = []
 DEFAULT_CONTAINER_DENYLIST: List[str] = []
 
 
+# Audio language tags that are NOT a specific foreign language — treat as
+# acceptable so we never reject a legit English/original release. English is
+# frequently left untagged ("und") or marked "mul"/"zxx" on multi/no-language
+# tracks. Normalised en/english → eng before comparison.
+NEUTRAL_AUDIO_LANGS = {"und", "unknown", "mis", "mul", "zxx", "", "eng"}
+
+
+def _norm_lang(lang: Optional[str]) -> str:
+    """Normalise an ffprobe language tag to a lowercase ISO-639-2/B-ish token."""
+    l = (lang or "").strip().lower()
+    if l in ("en", "eng", "english"):
+        return "eng"
+    return l
+
+
 @dataclass
 class ProbeResult:
     """Outcome of validating a single stream URL."""
@@ -33,6 +48,8 @@ class ProbeResult:
     duration: Optional[float] = None
     video_codec: Optional[str] = None
     audio_codec: Optional[str] = None
+    audio_langs: List[str] = field(default_factory=list)
+    sub_langs: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -44,6 +61,12 @@ class ValidationPolicy:
     audio_denylist: List[str] = field(default_factory=lambda: list(DEFAULT_AUDIO_DENYLIST))
     container_denylist: List[str] = field(default_factory=lambda: list(DEFAULT_CONTAINER_DENYLIST))
     probe_timeout_seconds: int = 10
+    # Language preference. When require_preferred_audio is on, a stream whose
+    # audio tracks are ALL an explicit non-preferred foreign language (e.g. a
+    # Polish/Russian dub) is rejected so the resolver falls through to an
+    # English/original-audio source. Untagged/neutral audio always passes.
+    preferred_audio_langs: List[str] = field(default_factory=lambda: ["eng"])
+    require_preferred_audio: bool = False
 
 
 class StreamValidator:
@@ -70,7 +93,8 @@ class StreamValidator:
             # HTTP/network read timeout in microseconds (protocol-level option).
             "-timeout", str(timeout * 1_000_000),
             "-user_agent", "Mozilla/5.0 (jf-resolve)",
-            "-show_entries", "format=format_name,duration:stream=codec_name,codec_type",
+            "-show_entries",
+            "format=format_name,duration:stream=codec_name,codec_type:stream_tags=language,title",
             "-of", "json",
             url,
         ]
@@ -121,6 +145,11 @@ class StreamValidator:
         video = next((s for s in streams if s.get("codec_type") == "video"), None)
         audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
 
+        audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
+        sub_streams = [s for s in streams if s.get("codec_type") == "subtitle"]
+        audio_langs = [_norm_lang((s.get("tags") or {}).get("language")) for s in audio_streams]
+        sub_langs = [_norm_lang((s.get("tags") or {}).get("language")) for s in sub_streams]
+
         format_name = fmt.get("format_name")
         video_codec = (video or {}).get("codec_name")
         audio_codec = (audio or {}).get("codec_name")
@@ -138,6 +167,8 @@ class StreamValidator:
             duration=duration,
             video_codec=video_codec,
             audio_codec=audio_codec,
+            audio_langs=audio_langs,
+            sub_langs=sub_langs,
         )
 
         # Liveness: must actually contain a video stream.
@@ -168,5 +199,20 @@ class StreamValidator:
             result.ok = False
             result.reason = f"audio_codec_denied ({audio_codec})"
             return result
+
+        # Language gate: reject foreign-only dubs so we hear English/original
+        # audio. Passes when ANY audio track is preferred OR neutral/untagged
+        # (English is often left untagged). Only rejects when every audio track
+        # carries an explicit non-preferred foreign tag (e.g. a pol/rus dub).
+        if self.policy.require_preferred_audio and audio_langs:
+            preferred = {_norm_lang(l) for l in self.policy.preferred_audio_langs}
+            acceptable = preferred | NEUTRAL_AUDIO_LANGS
+            if not any(l in acceptable for l in audio_langs):
+                result.ok = False
+                result.reason = (
+                    f"foreign_audio (audio={audio_langs} subs={sub_langs}; "
+                    f"want one of {sorted(preferred)})"
+                )
+                return result
 
         return result
