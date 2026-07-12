@@ -11,6 +11,16 @@ from urllib3.util.retry import Retry
 from .log_service import log_service
 
 
+# Shared cam / theatrical-rip / screener detector — kept in sync with
+# rd_service.CAM_PATTERN. Matches camcorder rips, telesyncs, telecines,
+# digital-cinema rips (DCP/DCPRiP), pre-retail, screeners, mic-dubs (MD)
+# and Korean-subbed cams. Below-retail sources we never auto-serve.
+CAM_PATTERN = re.compile(
+    r'\b(cam|camrip|hdcam|hqcam|ts|hdts|telesync|tc|hdtc|telecine|'
+    r'scr|screener|dvdscr|dcp|dcprip|pdvd|predvd|korsub|md)\b'
+)
+
+
 class StremioService:
     """Stremio addon manifest integration"""
 
@@ -366,7 +376,7 @@ class StremioService:
         text = f"{title} {name}"
 
         # Detect CAMs/Screeners first so they don't get misclassified as high quality
-        if re.search(r'\b(cam|camrip|hdcam|hdts|telesync|hdtc|screener|dvdscr)\b', text):
+        if CAM_PATTERN.search(text):
             return "cam"
 
         # 4K / 2160p

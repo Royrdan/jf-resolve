@@ -9,6 +9,17 @@ import httpx
 from .log_service import log_service
 
 
+# Shared cam / theatrical-rip / screener detector. Matches camcorder rips
+# (CAM/HDCAM/HQCAM), telesyncs (TS/HDTS/TELESYNC), telecines (TC/HDTC/TELECINE),
+# digital-cinema rips (DCP/DCPRiP), pre-retail (PDVD/PreDVD), screeners
+# (SCR/SCREENER/DVDSCR), mic-dubs (MD) and Korean-subbed cams (KORSUB).
+# These are all below-retail sources we never want to auto-serve.
+CAM_PATTERN = re.compile(
+    r'\b(cam|camrip|hdcam|hqcam|ts|hdts|telesync|tc|hdtc|telecine|'
+    r'scr|screener|dvdscr|dcp|dcprip|pdvd|predvd|korsub|md)\b'
+)
+
+
 class RDService:
     """
     Queries the user's own Real-Debrid torrent library to find cached files
@@ -43,8 +54,8 @@ class RDService:
         """Return quality rank from filename (higher = better)."""
         f = filename.lower()
         
-        # Detect CAMs/Screeners
-        if re.search(r'\b(cam|camrip|hdcam|hdts|telesync|hdtc|screener|dvdscr)\b', f):
+        # Detect CAMs / theatrical rips / screeners (see CAM_PATTERN)
+        if CAM_PATTERN.search(f):
             return 0.5
             
         if any(ind in f for ind in ["4k", "2160p", "2160", "uhd", "ultra hd", "ultrahd", "ultra-hd"]):
@@ -379,6 +390,7 @@ class RDService:
         preferred_quality: str = "1080p",
         use_index: int = 0,
         strict_quality: bool = False,
+        block_cam: bool = True,
     ) -> Optional[str]:
         """
         Search the user's RD library for a specific TV episode.
@@ -452,6 +464,15 @@ class RDService:
 
                 q_rank = self._quality_rank(file_path)
 
+                # Never auto-serve cam-tier rips (CAM/TS/TC/DCP/SCR/…). q_rank 0.5
+                # is the unique cam bucket from _quality_rank.
+                if block_cam and q_rank == 0.5:
+                    log_service.info(
+                        f"RD: skipping cam-tier episode {files[file_idx].get('path')} "
+                        f"(block_cam on)"
+                    )
+                    continue
+
                 # On an EXPLICIT quality request, hard-skip mismatches (the caller
                 # asked for a specific quality). On `auto`, quality is only a
                 # preference: keep mismatches as lower-scored fallbacks so a
@@ -513,6 +534,7 @@ class RDService:
         preferred_quality: str = "1080p",
         use_index: int = 0,
         strict_quality: bool = False,
+        block_cam: bool = True,
     ) -> Optional[str]:
         """
         Search the user's RD library for a movie file.
@@ -573,6 +595,14 @@ class RDService:
                     continue
 
                 q_rank = self._quality_rank(file_path)
+
+                # Never auto-serve cam-tier rips (see find_episode_stream).
+                if block_cam and q_rank == 0.5:
+                    log_service.info(
+                        f"RD: skipping cam-tier movie {files[file_idx].get('path')} "
+                        f"(block_cam on)"
+                    )
+                    continue
 
                 # Strict on explicit quality, preference on auto (see find_episode_stream).
                 if strict_quality and pref_rank > 0 and q_rank > 0 and q_rank != pref_rank:

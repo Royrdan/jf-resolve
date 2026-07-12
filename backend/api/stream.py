@@ -178,6 +178,12 @@ async def resolve_stream(
         rd_api_key_val = await settings.get("rd_api_key")
         rd_direct_enabled = await settings.get("rd_direct_enabled", False)
 
+        # When on (default), cam/telesync/DCP-rip/screener sources are never
+        # served — better to show "unavailable" than a camcorder of an
+        # in-cinema film. Applies to both the RD library lookup and the
+        # Stremio addon fallback below.
+        block_cam = await settings.get("block_cam", True)
+
         if rd_api_key_val and rd_direct_enabled:
             rd_target_quality = quality
             rd_strict_quality = bool(quality and quality.lower() != "auto")
@@ -193,11 +199,13 @@ async def resolve_stream(
                         rd_url = await rd.find_episode_stream(
                             media_title, season, episode, rd_target_quality,
                             use_index, strict_quality=rd_strict_quality,
+                            block_cam=block_cam,
                         )
                     else:
                         rd_url = await rd.find_movie_stream(
                             media_title, media_year, rd_target_quality,
                             use_index, strict_quality=rd_strict_quality,
+                            block_cam=block_cam,
                         )
 
                     if rd_url:
@@ -265,6 +273,27 @@ async def resolve_stream(
                 season=season if media_type == "tv" else None,
                 episode=episode if media_type == "tv" else None,
             )
+
+        # Drop cam-tier sources entirely (default on). Better a clean 404 than
+        # streaming a camcorder rip of something still in cinemas.
+        if block_cam:
+            before = len(streams)
+            streams = [
+                s for s in streams if StremioService.detect_quality(s) != "cam"
+            ]
+            dropped = before - len(streams)
+            if dropped:
+                log_service.info(
+                    f"block_cam: dropped {dropped} cam-tier stream(s) for {state_key}"
+                )
+            if not streams:
+                log_service.info(
+                    f"block_cam: only cam-tier sources available for {state_key} — refusing"
+                )
+                raise HTTPException(
+                    status_code=404,
+                    detail="Only cam-tier sources available (blocked by block_cam)",
+                )
 
         # Re-initialize StremioService with the successful URL for select_stream logic
         # Note: We closed it in the loop, but select_stream is a static/utility method on the instance
