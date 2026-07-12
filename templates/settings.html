@@ -601,6 +601,31 @@
                         />
                     </label>
                 </div>
+
+                <div class="divider">Source Filtering</div>
+
+                <div class="form-control">
+                    <label class="label cursor-pointer">
+                        <span class="label-text font-semibold"
+                            >Block cam / theatrical rips</span
+                        >
+                        <input
+                            type="checkbox"
+                            x-model="settings.block_cam"
+                            class="checkbox checkbox-primary"
+                        />
+                    </label>
+                    <label class="label">
+                        <span class="label-text-alt opacity-70">
+                            Never serve cam-tier sources (CAM, TS/telesync,
+                            TC/telecine, DCP-rip, screener, mic-dub, etc.).
+                            In-cinema titles with no proper release will show as
+                            unavailable instead of playing a camcorder rip.
+                            Applies to both the Real-Debrid library lookup and
+                            the Stremio addon fallback.
+                        </span>
+                    </label>
+                </div>
             </div>
         </div>
     </div>
@@ -1310,6 +1335,8 @@
                     this.settings.series_preferred_quality = "1080p";
                 if (this.settings.quality_fallback_enabled === undefined)
                     this.settings.quality_fallback_enabled = true;
+                if (this.settings.block_cam === undefined)
+                    this.settings.block_cam = true;
                 if (!this.settings.failover_grace_seconds)
                     this.settings.failover_grace_seconds = 45;
                 if (!this.settings.failover_window_seconds)
