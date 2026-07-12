@@ -210,6 +210,16 @@ async def resolve_stream(
         # resolver falls through to an English/original-audio source.
         prefer_english_audio = await settings.get("prefer_english_audio", True)
         preferred_audio_langs = await settings.get("preferred_audio_langs", ["eng"])
+        # Subtitle preference (soft tiebreaker, not a hard gate): among sources
+        # that already pass the audio-language check, prefer one that carries a
+        # preferred-language subtitle track; only fall back to a subtitle-less
+        # source when no subtitled one is available.
+        prefer_subtitles = await settings.get("prefer_subtitles", True)
+        preferred_subtitle_langs = await settings.get("preferred_subtitle_langs", ["eng"])
+        _pref_sub_set = {
+            "eng" if s.strip().lower() in ("en", "eng", "english") else s.strip().lower()
+            for s in preferred_subtitle_langs
+        }
         validation_enabled = await settings.get("stream_validation_enabled", True)
         validator = None
         if validation_enabled:
@@ -437,6 +447,10 @@ async def resolve_stream(
         # foreign-dub source, so the exhausted-retries fallback 404s instead of
         # serving one of those (better "unavailable" than a camcorder/dub).
         saw_unacceptable = False
+        # First fully-acceptable candidate that lacked a preferred-language
+        # subtitle. Held while we keep scanning for a subtitled one; used as the
+        # fallback if none of the remaining candidates has subtitles.
+        held_no_sub_url = None
 
         async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
             for retry in range(MAX_EPISODE_RETRIES + 1):
@@ -583,7 +597,27 @@ async def resolve_stream(
                             f"subs={probe.sub_langs} dur={probe.duration}"
                         )
 
-                    # Correct episode (or movie/unknown) and playable — accept this URL
+                        # Subtitle preference (soft): if this otherwise-good
+                        # source has no preferred-language subtitle, hold it and
+                        # keep scanning for one that does. Accept a subtitled
+                        # source immediately. Falls back to the held source if no
+                        # subtitled candidate turns up.
+                        if prefer_subtitles and _pref_sub_set:
+                            has_pref_sub = bool(set(probe.sub_langs) & _pref_sub_set)
+                            if not has_pref_sub:
+                                if held_no_sub_url is None:
+                                    held_no_sub_url = resolved
+                                log_service.info(
+                                    f"Candidate playable but has no "
+                                    f"{sorted(_pref_sub_set)} subtitles (subs="
+                                    f"{probe.sub_langs}) for {state_key} — holding "
+                                    f"and scanning for a subtitled source "
+                                    f"(attempt {retry + 1}/{MAX_EPISODE_RETRIES + 1})"
+                                )
+                                continue
+
+                    # Correct episode (or movie/unknown) and playable (and, when
+                    # subtitle preference is on, carries preferred subs) — accept.
                     final_url = resolved
                     break
 
@@ -593,6 +627,16 @@ async def resolve_stream(
                         f"[{type(e).__name__}]: {e}"
                     )
                     continue
+
+        # No subtitled candidate found — fall back to the best acceptable
+        # (playable, right-language) source we held aside, even though it lacks
+        # preferred subtitles. A watchable source beats none.
+        if not final_url and held_no_sub_url is not None:
+            final_url = held_no_sub_url
+            log_service.info(
+                f"No source with preferred subtitles for {state_key}; using best "
+                f"acceptable source without them."
+            )
 
         if final_url:
             RESOLVE_CACHE[cache_key] = (time.time(), final_url)

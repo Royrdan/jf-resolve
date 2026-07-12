@@ -649,6 +649,29 @@
                         </span>
                     </label>
                 </div>
+
+                <div class="form-control">
+                    <label class="label cursor-pointer">
+                        <span class="label-text font-semibold"
+                            >Prefer sources with subtitles</span
+                        >
+                        <input
+                            type="checkbox"
+                            x-model="settings.prefer_subtitles"
+                            class="checkbox checkbox-primary"
+                        />
+                    </label>
+                    <label class="label">
+                        <span class="label-text-alt opacity-70">
+                            Soft preference (needs the audio check / ffprobe on).
+                            Among sources that pass the audio-language check,
+                            prefers one that has an English subtitle track; only
+                            falls back to a subtitle-less source when no
+                            subtitled one is available. Never blocks playback on
+                            its own.
+                        </span>
+                    </label>
+                </div>
             </div>
         </div>
     </div>
@@ -1362,6 +1385,8 @@
                     this.settings.block_cam = true;
                 if (this.settings.prefer_english_audio === undefined)
                     this.settings.prefer_english_audio = true;
+                if (this.settings.prefer_subtitles === undefined)
+                    this.settings.prefer_subtitles = true;
                 if (!this.settings.failover_grace_seconds)
                     this.settings.failover_grace_seconds = 45;
                 if (!this.settings.failover_window_seconds)
