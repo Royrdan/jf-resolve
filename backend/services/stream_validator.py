@@ -14,11 +14,15 @@ from typing import List, Optional
 
 from .log_service import log_service
 
-# Codecs/containers known to fail playback. Empty by default — the NVIDIA
-# Shield (and most clients) direct-play almost everything, so we only block
-# specific types that are actually reported as unplayable. Add entries here as
-# bad file types surface. Liveness + min-duration checks always apply.
-DEFAULT_VIDEO_DENYLIST: List[str] = []
+# Codecs/containers known to fail playback. The NVIDIA Shield (and most
+# clients) direct-play almost everything, so we only block specific types that
+# are actually reported as unplayable. Add entries here as bad file types
+# surface. Liveness + min-duration checks always apply.
+#   av1 — Frozen (2013) froze on playback 2026-07-24: resolved to an AV1/Opus
+#         encode the client couldn't hardware-decode. AV1 has no reliable decode
+#         support across the household's players; an h264/h265 release is almost
+#         always available to fail over to.
+DEFAULT_VIDEO_DENYLIST: List[str] = ["av1"]
 DEFAULT_AUDIO_DENYLIST: List[str] = []
 DEFAULT_CONTAINER_DENYLIST: List[str] = []
 
