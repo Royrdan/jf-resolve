@@ -19,7 +19,13 @@ from ..services.library_service import LibraryService
 from ..services.log_service import log_service
 from ..services.rd_service import RDService
 from ..services.settings_manager import SettingsManager
-from ..services.stream_validator import StreamValidator, ValidationPolicy
+from ..services.stream_validator import (
+    DEFAULT_AUDIO_DENYLIST,
+    DEFAULT_CONTAINER_DENYLIST,
+    DEFAULT_VIDEO_DENYLIST,
+    StreamValidator,
+    ValidationPolicy,
+)
 from ..services.stremio_service import StremioService, CAM_PATTERN
 from ..services.tmdb_service import TMDBService
 
@@ -226,9 +232,9 @@ async def resolve_stream(
             if StreamValidator.available():
                 policy = ValidationPolicy(
                     min_duration_seconds=await settings.get("stream_min_duration_seconds", 180),
-                    video_denylist=await settings.get("stream_video_denylist", []),
-                    audio_denylist=await settings.get("stream_audio_denylist", []),
-                    container_denylist=await settings.get("stream_container_denylist", []),
+                    video_denylist=await settings.get("stream_video_denylist", DEFAULT_VIDEO_DENYLIST),
+                    audio_denylist=await settings.get("stream_audio_denylist", DEFAULT_AUDIO_DENYLIST),
+                    container_denylist=await settings.get("stream_container_denylist", DEFAULT_CONTAINER_DENYLIST),
                     probe_timeout_seconds=await settings.get("stream_probe_timeout_seconds", 10),
                     preferred_audio_langs=preferred_audio_langs,
                     require_preferred_audio=prefer_english_audio,

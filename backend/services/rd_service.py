@@ -7,6 +7,25 @@ from typing import Dict, List, Optional
 import httpx
 
 from .log_service import log_service
+from .stream_validator import DEFAULT_VIDEO_DENYLIST
+
+
+def _has_denied_video_codec(name: str) -> bool:
+    """True if a library filename advertises a denylisted video codec (e.g. av1).
+
+    The RD-direct path selects a file by its library name and never ffprobes it,
+    so a codec the household's players can't decode (AV1) has to be excluded here
+    by name — otherwise it gets unrestricted and served straight to the client,
+    which then freezes. Matched as a whole token so 'av1' can't false-match
+    inside another word.
+    """
+    if not DEFAULT_VIDEO_DENYLIST:
+        return False
+    lowered = name.lower()
+    return any(
+        re.search(rf'(?<![a-z0-9]){re.escape(c.lower())}(?![a-z0-9])', lowered)
+        for c in DEFAULT_VIDEO_DENYLIST
+    )
 
 
 # Shared cam / theatrical-rip / screener detector. Matches camcorder rips
@@ -462,6 +481,13 @@ class RDService:
                     )
                     continue
 
+                if _has_denied_video_codec(file_path):
+                    log_service.info(
+                        f"RD: skipping episode {files[file_idx].get('path')} "
+                        f"(denylisted video codec — unplayable)"
+                    )
+                    continue
+
                 q_rank = self._quality_rank(file_path)
 
                 # Never auto-serve cam-tier rips (CAM/TS/TC/DCP/SCR/…). q_rank 0.5
@@ -591,6 +617,13 @@ class RDService:
                 if self._is_extras_path(file_path):
                     log_service.info(
                         f"RD: skipping movie extra {files[file_idx].get('path')} (featurette/sample/extras)"
+                    )
+                    continue
+
+                if _has_denied_video_codec(file_path):
+                    log_service.info(
+                        f"RD: skipping movie {files[file_idx].get('path')} "
+                        f"(denylisted video codec — unplayable)"
                     )
                     continue
 
