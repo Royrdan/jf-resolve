@@ -1,5 +1,6 @@
 """Real-Debrid direct library integration"""
 
+import asyncio
 import re
 import time
 from typing import Dict, List, Optional
@@ -55,9 +56,62 @@ class RDService:
     # Per-torrent info cache keyed by torrent_id: (timestamp, info_dict)
     _info_cache: Dict[str, tuple] = {}
 
+    # Process-wide RD API throttle. Real-Debrid rate-limits per ACCOUNT (token),
+    # and this addon is the sole caller, so ONE limiter shared across every
+    # RDService instance is correct. Every RD call goes through _request(), which
+    # serialises on _throttle_lock and enforces MIN_INTERVAL spacing so bursts
+    # (many parallel episode resolves, cache-cold replays, debugging storms)
+    # can't hammer RD — that burst behaviour previously earned the account an
+    # abuse warning + forced token rotation.
+    _throttle_lock = asyncio.Lock()
+    _last_call = 0.0
+    MIN_INTERVAL = 0.6     # seconds between RD API calls (~100/min, well under cap)
+    MAX_RETRIES = 4        # exponential backoff attempts on HTTP 429
+
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.headers = {"Authorization": f"Bearer {api_key}"}
+
+    async def _request(self, method: str, url: str, **kwargs) -> Optional[httpx.Response]:
+        """Single choke-point for every Real-Debrid API call: process-wide rate
+        limiting + exponential backoff on HTTP 429. Returns the response (which
+        may still carry a non-200 status for the caller to handle) or None on a
+        transport-level error."""
+        kwargs.setdefault("timeout", 10.0)
+        kwargs.setdefault("headers", self.headers)
+        endpoint = url.split(self.BASE_URL)[-1] or url
+        resp = None
+        for attempt in range(self.MAX_RETRIES + 1):
+            # Rate limit: space out consecutive RD calls. Holding the lock across
+            # the sleep serialises callers so concurrent resolves queue instead
+            # of bursting.
+            async with RDService._throttle_lock:
+                gap = time.monotonic() - RDService._last_call
+                if gap < self.MIN_INTERVAL:
+                    await asyncio.sleep(self.MIN_INTERVAL - gap)
+                RDService._last_call = time.monotonic()
+
+            try:
+                async with httpx.AsyncClient(verify=False) as client:
+                    resp = await client.request(method, url, **kwargs)
+            except Exception as e:
+                log_service.error(
+                    f"RD: {method} {endpoint} transport error "
+                    f"[{type(e).__name__}]: {e}"
+                )
+                return None
+
+            if resp.status_code == 429 and attempt < self.MAX_RETRIES:
+                ra = (resp.headers.get("Retry-After") or "").strip()
+                delay = float(ra) if ra.replace(".", "", 1).isdigit() else min(2 ** attempt, 20)
+                log_service.warning(
+                    f"RD: 429 rate-limited on {endpoint}; backing off "
+                    f"{delay:.1f}s (retry {attempt + 1}/{self.MAX_RETRIES})"
+                )
+                await asyncio.sleep(delay)
+                continue
+            return resp
+        return resp
 
     # ------------------------------------------------------------------
     # Helpers
@@ -130,27 +184,26 @@ class RDService:
 
         torrents: List[Dict] = []
         try:
-            async with httpx.AsyncClient(verify=False) as client:
-                page = 1
-                while True:
-                    resp = await client.get(
-                        f"{self.BASE_URL}/torrents",
-                        headers=self.headers,
-                        params={"limit": 100, "page": page},
-                        timeout=10.0,
-                    )
-                    if resp.status_code != 200:
+            page = 1
+            while True:
+                resp = await self._request(
+                    "GET",
+                    f"{self.BASE_URL}/torrents",
+                    params={"limit": 100, "page": page},
+                )
+                if resp is None or resp.status_code != 200:
+                    if resp is not None:
                         log_service.error(
                             f"RD: /torrents returned {resp.status_code}"
                         )
-                        break
-                    page_data = resp.json()
-                    if not page_data:
-                        break
-                    torrents.extend(page_data)
-                    if len(page_data) < 100:
-                        break
-                    page += 1
+                    break
+                page_data = resp.json()
+                if not page_data:
+                    break
+                torrents.extend(page_data)
+                if len(page_data) < 100:
+                    break
+                page += 1
 
             self._cache[self.api_key] = (now, torrents)
             log_service.info(f"RD: fetched {len(torrents)} torrents from library")
@@ -167,16 +220,14 @@ class RDService:
             return cached[1]
 
         try:
-            async with httpx.AsyncClient(verify=False) as client:
-                resp = await client.get(
-                    f"{self.BASE_URL}/torrents/info/{torrent_id}",
-                    headers=self.headers,
-                    timeout=10.0,
-                )
-                if resp.status_code == 200:
-                    info = resp.json()
-                    self._info_cache[torrent_id] = (now, info)
-                    return info
+            resp = await self._request(
+                "GET", f"{self.BASE_URL}/torrents/info/{torrent_id}"
+            )
+            if resp is not None and resp.status_code == 200:
+                info = resp.json()
+                self._info_cache[torrent_id] = (now, info)
+                return info
+            if resp is not None:
                 log_service.error(
                     f"RD: /torrents/info/{torrent_id} returned {resp.status_code}"
                 )
@@ -189,15 +240,14 @@ class RDService:
     async def unrestrict_link(self, link: str) -> Optional[str]:
         """Convert an RD hoster link to a direct CDN download URL."""
         try:
-            async with httpx.AsyncClient(verify=False) as client:
-                resp = await client.post(
-                    f"{self.BASE_URL}/unrestrict/link",
-                    headers=self.headers,
-                    data={"link": link},
-                    timeout=10.0,
-                )
-                if resp.status_code == 200:
-                    return resp.json().get("download")
+            resp = await self._request(
+                "POST",
+                f"{self.BASE_URL}/unrestrict/link",
+                data={"link": link},
+            )
+            if resp is not None and resp.status_code == 200:
+                return resp.json().get("download")
+            if resp is not None:
                 log_service.error(
                     f"RD: /unrestrict/link returned {resp.status_code}: {resp.text[:200]}"
                 )
@@ -211,15 +261,14 @@ class RDService:
         """Add a magnet (by infohash) to RD; return the new torrent id."""
         magnet = f"magnet:?xt=urn:btih:{infohash}"
         try:
-            async with httpx.AsyncClient(verify=False) as client:
-                resp = await client.post(
-                    f"{self.BASE_URL}/torrents/addMagnet",
-                    headers=self.headers,
-                    data={"magnet": magnet},
-                    timeout=10.0,
-                )
-                if resp.status_code in (200, 201):
-                    return resp.json().get("id")
+            resp = await self._request(
+                "POST",
+                f"{self.BASE_URL}/torrents/addMagnet",
+                data={"magnet": magnet},
+            )
+            if resp is not None and resp.status_code in (200, 201):
+                return resp.json().get("id")
+            if resp is not None:
                 log_service.error(
                     f"RD: /torrents/addMagnet returned {resp.status_code}: {resp.text[:200]}"
                 )
@@ -230,13 +279,11 @@ class RDService:
     async def select_all_files(self, torrent_id: str) -> None:
         """Select all files on a torrent so RD generates download links."""
         try:
-            async with httpx.AsyncClient(verify=False) as client:
-                await client.post(
-                    f"{self.BASE_URL}/torrents/selectFiles/{torrent_id}",
-                    headers=self.headers,
-                    data={"files": "all"},
-                    timeout=10.0,
-                )
+            await self._request(
+                "POST",
+                f"{self.BASE_URL}/torrents/selectFiles/{torrent_id}",
+                data={"files": "all"},
+            )
         except Exception as e:
             log_service.error(
                 f"RD: failed to select files for {torrent_id} [{type(e).__name__}]: {e}"
@@ -245,12 +292,9 @@ class RDService:
     async def delete_torrent(self, torrent_id: str) -> None:
         """Remove a torrent from the RD library (used to clean up failed adds)."""
         try:
-            async with httpx.AsyncClient(verify=False) as client:
-                await client.delete(
-                    f"{self.BASE_URL}/torrents/delete/{torrent_id}",
-                    headers=self.headers,
-                    timeout=10.0,
-                )
+            await self._request(
+                "DELETE", f"{self.BASE_URL}/torrents/delete/{torrent_id}"
+            )
         except Exception as e:
             log_service.error(
                 f"RD: failed to delete torrent {torrent_id} [{type(e).__name__}]: {e}"
