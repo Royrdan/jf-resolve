@@ -523,6 +523,25 @@ class RDService:
             # Sort descending by score
             matches.sort(key=lambda x: x[0], reverse=True)
 
+            # Quality floor (auto only): the RD library is a fast path, but it
+            # must not short-circuit playback with a copy far below the preferred
+            # quality when a better source may exist via Stremio. If the best
+            # downloaded match is more than one tier under the preference, defer
+            # to the caller's quality-first Stremio walk (which will resolve and
+            # seed a better source into RD for next time). Strict/explicit
+            # requests and near-preferred matches (within one tier) still serve
+            # instantly.
+            if not strict_quality and pref_rank > 0:
+                best_rank = self._quality_rank(matches[0][2])
+                if best_rank > 0 and (pref_rank - best_rank) > 1.0:
+                    log_service.info(
+                        f"RD: best downloaded match {matches[0][2]} "
+                        f"(q_rank={best_rank}) is >1 tier below preferred "
+                        f"(pref_rank={pref_rank}); deferring to Stremio for a "
+                        f"higher-quality source."
+                    )
+                    return None
+
             # The failover index walks the (potentially long) torrentio candidate
             # list; the RD library usually has only 1-2 matches for an episode.
             # Clamp rather than return None, so a climbing failover counter never
@@ -657,6 +676,20 @@ class RDService:
         if matches:
             # Sort descending by score
             matches.sort(key=lambda x: x[0], reverse=True)
+
+            # Quality floor (auto only) — see find_episode_stream. Don't let the
+            # RD fast path short-circuit with a copy >1 tier below the preferred
+            # quality; defer to the Stremio quality-first walk instead.
+            if not strict_quality and pref_rank > 0:
+                best_rank = self._quality_rank(matches[0][2])
+                if best_rank > 0 and (pref_rank - best_rank) > 1.0:
+                    log_service.info(
+                        f"RD: best downloaded match {matches[0][2]} "
+                        f"(q_rank={best_rank}) is >1 tier below preferred "
+                        f"(pref_rank={pref_rank}); deferring to Stremio for a "
+                        f"higher-quality source."
+                    )
+                    return None
 
             # Clamp (see find_episode_stream) — a climbing failover index must not
             # abandon a movie we have downloaded in RD.
