@@ -445,10 +445,21 @@ async def resolve_stream(
             state.current_index = 0
             await failover.update_state(state)
 
-        stream_url = candidates[use_index]
+        # The in-request validation walk ALWAYS starts at the best-quality
+        # candidate (index 0) and scans the whole list, regardless of the
+        # failover offset. should_failover() advances current_index on elapsed
+        # time (not proven playback failure), so a long/seeked healthy playback
+        # can drift the persisted index past the best sources; honouring it as a
+        # hard start-offset permanently demoted quality (e.g. skipping a cached
+        # 1080p HEVC and landing on 480p). Per-candidate validation still skips
+        # genuinely dead links, and the held-quality guard prevents demotion.
+        walk_start = 0
+        stream_url = candidates[walk_start]
 
         log_service.stream(
-            f"Resolved {state_key} quality={quality} index={use_index} attempt={state.attempt_count} → {stream_url[:100]}..."
+            f"Resolved {state_key} quality={quality} walk_start={walk_start} "
+            f"(failover_index={use_index}) attempt={state.attempt_count} → "
+            f"{stream_url[:100]}..."
         )
 
         # The ffprobe validator (playability + language gate) was built once up
@@ -461,7 +472,7 @@ async def resolve_stream(
 
         final_url = None
         retry_stream_url = stream_url
-        retry_index = use_index
+        retry_index = walk_start
         # Set when a candidate is rejected specifically for being a cam-tier or
         # foreign-dub source, so the exhausted-retries fallback 404s instead of
         # serving one of those (better "unavailable" than a camcorder/dub).
