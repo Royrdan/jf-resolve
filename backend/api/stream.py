@@ -261,13 +261,13 @@ async def resolve_stream(
                         rd_url = await rd.find_episode_stream(
                             media_title, season, episode, rd_target_quality,
                             use_index, strict_quality=rd_strict_quality,
-                            block_cam=block_cam,
+                            block_cam=block_cam, prefer_english=prefer_english_audio,
                         )
                     else:
                         rd_url = await rd.find_movie_stream(
                             media_title, media_year, rd_target_quality,
                             use_index, strict_quality=rd_strict_quality,
-                            block_cam=block_cam,
+                            block_cam=block_cam, prefer_english=prefer_english_audio,
                         )
 
                     # Probe the RD library hit through the shared validator so

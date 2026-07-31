@@ -8,11 +8,25 @@ to reject dead/expired debrid links, non-media error pages, too-short files
 
 import asyncio
 import json
+import re
 import shutil
 from dataclasses import dataclass, field
 from typing import List, Optional
+from urllib.parse import unquote, urlparse
 
 from .log_service import log_service
+
+# Known foreign-dub release groups / language tags whose audio is frequently
+# LEFT UNTAGGED — so the ffprobe language gate below cannot catch them (an
+# untagged Russian voiceover looks identical to an untagged English original).
+# These groups (ColdFilm, Ultradox, LostFilm, … are Russian voiceover studios)
+# must be rejected on the resolved FILENAME instead. Kept tight to avoid false
+# positives on genuine English releases; the ru/rus token requires delimiters
+# so titles like "Krusty" don't match.
+FOREIGN_DUB_RELEASE = re.compile(
+    r'(?i)(?:\b(?:coldfilm|ultradox|lostfilm|hdrezka|baibako|newstudio|'
+    r'kerob|jaskier|kubik|amedia)\b|[._\s\-]rus?[._\s\-]|\brussian\b)'
+)
 
 # Codecs/containers known to fail playback. The NVIDIA Shield (and most
 # clients) direct-play almost everything, so we only block specific types that
@@ -138,6 +152,20 @@ class StreamValidator:
 
     async def validate(self, url: str) -> ProbeResult:
         """Probe `url` and return whether it is playable under the policy."""
+        # Filename-based foreign-dub gate (runs BEFORE ffprobe): some release
+        # groups ship their non-English audio UNTAGGED, so the language gate
+        # below would wave them through as "neutral". When English is required,
+        # reject known foreign-dub releases on the resolved filename so we never
+        # serve (or waste a probe on) e.g. a ColdFilm/Ultradox Russian voiceover.
+        if self.policy.require_preferred_audio and "eng" in {
+            _norm_lang(l) for l in self.policy.preferred_audio_langs
+        }:
+            fname = unquote(urlparse(url).path).rsplit("/", 1)[-1].lower()
+            if FOREIGN_DUB_RELEASE.search(fname):
+                return ProbeResult(
+                    ok=False, reason=f"foreign_dub_release ({fname[:80]})"
+                )
+
         data = await self._run_ffprobe(url)
         if data is None:
             # ffprobe couldn't open it: dead link, HTML error page, or corrupt.

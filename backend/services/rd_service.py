@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import httpx
 
 from .log_service import log_service
-from .stream_validator import DEFAULT_VIDEO_DENYLIST
+from .stream_validator import DEFAULT_VIDEO_DENYLIST, FOREIGN_DUB_RELEASE
 
 
 def _has_denied_video_codec(name: str) -> bool:
@@ -454,6 +454,7 @@ class RDService:
         use_index: int = 0,
         strict_quality: bool = False,
         block_cam: bool = True,
+        prefer_english: bool = True,
     ) -> Optional[str]:
         """
         Search the user's RD library for a specific TV episode.
@@ -529,6 +530,17 @@ class RDService:
                     log_service.info(
                         f"RD: skipping episode {files[file_idx].get('path')} "
                         f"(denylisted video codec — unplayable)"
+                    )
+                    continue
+
+                # Foreign-dub release groups (ColdFilm/Ultradox/… RU voiceovers)
+                # ship UNTAGGED non-English audio the validator can't catch by
+                # tag — skip them here so the fast path returns the English copy
+                # (e.g. MeGusta) directly instead of a Russian dub.
+                if prefer_english and FOREIGN_DUB_RELEASE.search(file_path):
+                    log_service.info(
+                        f"RD: skipping foreign-dub episode {files[file_idx].get('path')} "
+                        f"(untagged non-English release group)"
                     )
                     continue
 
@@ -628,6 +640,7 @@ class RDService:
         use_index: int = 0,
         strict_quality: bool = False,
         block_cam: bool = True,
+        prefer_english: bool = True,
     ) -> Optional[str]:
         """
         Search the user's RD library for a movie file.
@@ -691,6 +704,15 @@ class RDService:
                     log_service.info(
                         f"RD: skipping movie {files[file_idx].get('path')} "
                         f"(denylisted video codec — unplayable)"
+                    )
+                    continue
+
+                # Foreign-dub release groups with untagged non-English audio
+                # (see find_episode_stream).
+                if prefer_english and FOREIGN_DUB_RELEASE.search(file_path):
+                    log_service.info(
+                        f"RD: skipping foreign-dub movie {files[file_idx].get('path')} "
+                        f"(untagged non-English release group)"
                     )
                     continue
 
