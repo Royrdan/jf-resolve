@@ -484,6 +484,11 @@ async def resolve_stream(
         # never demote it.
         held_no_sub_url = None
         held_no_sub_rank = -1
+        # Subtitles are only a soft tiebreaker: probe at most this many playable
+        # no-subtitle candidates in pursuit of a subtitled one, then serve the
+        # best-held source. Caps the extra ffprobe/RD calls the hunt costs.
+        MAX_SUBTITLE_SCANS = 3
+        sub_scans = 0
 
         async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
             for retry in range(MAX_EPISODE_RETRIES + 1):
@@ -653,12 +658,25 @@ async def resolve_stream(
                                 if held_no_sub_url is None or cand_rank > held_no_sub_rank:
                                     held_no_sub_url = resolved
                                     held_no_sub_rank = cand_rank
+                                sub_scans += 1
+                                if sub_scans >= MAX_SUBTITLE_SCANS:
+                                    # Tiebreaker budget spent — serve the best
+                                    # playable source we held rather than burning
+                                    # more RD/ffprobe calls hunting for subs.
+                                    log_service.info(
+                                        f"Subtitle scan budget "
+                                        f"({MAX_SUBTITLE_SCANS}) reached for "
+                                        f"{state_key}; serving best playable "
+                                        f"source without preferred subtitles."
+                                    )
+                                    final_url = held_no_sub_url
+                                    break
                                 log_service.info(
                                     f"Candidate playable but has no usable "
                                     f"subtitle (subs={probe.sub_langs}) for "
                                     f"{state_key} — holding and scanning for a "
                                     f"subtitled source "
-                                    f"(attempt {retry + 1}/{MAX_EPISODE_RETRIES + 1})"
+                                    f"(scan {sub_scans}/{MAX_SUBTITLE_SCANS})"
                                 )
                                 continue
                             # Has a usable subtitle. Accept it unless we already
