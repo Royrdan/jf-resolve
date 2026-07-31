@@ -50,19 +50,6 @@ def _filename_from_url(url: str) -> str:
     except Exception:
         return ""
 
-# Video-quality ordering used to make sure the subtitle preference never demotes
-# resolution. Higher rank = better picture. Mirrors StremioService.detect_quality
-# buckets; unknown/cam sit at the bottom.
-_QUALITY_RANK = {
-    "cam": 0,
-    "unknown": 1,
-    "480p": 2,
-    "720p": 3,
-    "1080p": 4,
-    "1440p": 5,
-    "4k": 6,
-}
-
 # Cache for resolved URLs: {key: (timestamp, url)}
 RESOLVE_CACHE = {}
 RESOLVE_CACHE_TTL = 3600  # 60 minutes
@@ -477,19 +464,6 @@ async def resolve_stream(
         # foreign-dub source, so the exhausted-retries fallback 404s instead of
         # serving one of those (better "unavailable" than a camcorder/dub).
         saw_unacceptable = False
-        # Best-quality fully-acceptable candidate that lacked a usable subtitle.
-        # Held while we keep scanning for a subtitled one; used as the fallback
-        # if none of the remaining candidates has subtitles. held_no_sub_rank is
-        # its video-quality rank so a subtitled-but-lower-quality candidate can
-        # never demote it.
-        held_no_sub_url = None
-        held_no_sub_rank = -1
-        # Subtitles are only a soft tiebreaker: probe at most this many playable
-        # no-subtitle candidates in pursuit of a subtitled one, then serve the
-        # best-held source. Caps the extra ffprobe/RD calls the hunt costs.
-        MAX_SUBTITLE_SCANS = 3
-        sub_scans = 0
-
         async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
             for retry in range(MAX_EPISODE_RETRIES + 1):
                 if retry > 0:
@@ -635,66 +609,29 @@ async def resolve_stream(
                             f"subs={probe.sub_langs} dur={probe.duration}"
                         )
 
-                        # Subtitle preference (soft): prefer a source that
-                        # carries a usable subtitle, but NEVER demote video
-                        # quality to get one. Any subtitle track counts as usable
-                        # — untagged ('') or 'und' tracks are almost always
-                        # English on English-language releases, so an explicitly
-                        # eng-tagged track is not required.
+                        # Subtitle preference (soft, ZERO extra probing): the
+                        # candidate walk is already quality-ordered, so the first
+                        # playable, correct-language source is the best available.
+                        # We accept it immediately and NEVER probe further
+                        # candidates hunting for an embedded subtitle track — these
+                        # releases rarely carry one, and every extra probe is an RD
+                        # unrestrict + ffprobe that slows the resolve and hammers
+                        # Real-Debrid. Subtitles are only noted; players (Jellyfin,
+                        # Infuse, etc.) fetch external subs regardless.
                         if prefer_subtitles and _pref_sub_set:
-                            cand_rank = _QUALITY_RANK.get(
-                                stremio.detect_quality(
-                                    {"title": resolved_name or resolved}
-                                ),
-                                1,
-                            )
                             has_pref_sub = any(
                                 (lang in _pref_sub_set) or lang in ("", "und", None)
                                 for lang in probe.sub_langs
                             )
                             if not has_pref_sub:
-                                # Hold the BEST-quality subtitle-less source as a
-                                # fallback and keep scanning for a subtitled one.
-                                if held_no_sub_url is None or cand_rank > held_no_sub_rank:
-                                    held_no_sub_url = resolved
-                                    held_no_sub_rank = cand_rank
-                                sub_scans += 1
-                                if sub_scans >= MAX_SUBTITLE_SCANS:
-                                    # Tiebreaker budget spent — serve the best
-                                    # playable source we held rather than burning
-                                    # more RD/ffprobe calls hunting for subs.
-                                    log_service.info(
-                                        f"Subtitle scan budget "
-                                        f"({MAX_SUBTITLE_SCANS}) reached for "
-                                        f"{state_key}; serving best playable "
-                                        f"source without preferred subtitles."
-                                    )
-                                    final_url = held_no_sub_url
-                                    break
                                 log_service.info(
-                                    f"Candidate playable but has no usable "
-                                    f"subtitle (subs={probe.sub_langs}) for "
-                                    f"{state_key} — holding and scanning for a "
-                                    f"subtitled source "
-                                    f"(scan {sub_scans}/{MAX_SUBTITLE_SCANS})"
+                                    f"Accepting best playable source for "
+                                    f"{state_key} (no embedded subtitle track; "
+                                    f"player will source subs externally)."
                                 )
-                                continue
-                            # Has a usable subtitle. Accept it unless we already
-                            # held a strictly higher-quality source — subtitles
-                            # must not cost us resolution.
-                            if held_no_sub_url is not None and cand_rank < held_no_sub_rank:
-                                log_service.info(
-                                    f"Subtitled candidate (rank {cand_rank}) is "
-                                    f"lower quality than held source (rank "
-                                    f"{held_no_sub_rank}) for {state_key}; keeping "
-                                    f"the higher-quality source (no demotion for "
-                                    f"subtitles)."
-                                )
-                                final_url = held_no_sub_url
-                                break
 
-                    # Correct episode (or movie/unknown) and playable (and, when
-                    # subtitle preference is on, carries preferred subs) — accept.
+                    # Correct episode (or movie/unknown) and playable — accept the
+                    # first (best-quality) acceptable source.
                     final_url = resolved
                     break
 
@@ -704,16 +641,6 @@ async def resolve_stream(
                         f"[{type(e).__name__}]: {e}"
                     )
                     continue
-
-        # No subtitled candidate found — fall back to the best acceptable
-        # (playable, right-language) source we held aside, even though it lacks
-        # preferred subtitles. A watchable source beats none.
-        if not final_url and held_no_sub_url is not None:
-            final_url = held_no_sub_url
-            log_service.info(
-                f"No source with preferred subtitles for {state_key}; using best "
-                f"acceptable source without them."
-            )
 
         if final_url:
             RESOLVE_CACHE[cache_key] = (time.time(), final_url)
