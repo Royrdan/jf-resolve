@@ -591,7 +591,11 @@ class RDService:
             # Clamp rather than return None, so a climbing failover counter never
             # abandons a file we DO have downloaded (which would 404 through to
             # torrentio). RD library is the canonical best source — always serve it.
-            start = use_index if use_index < len(matches) else len(matches) - 1
+            # A runaway failover index (climbs while playback keeps retrying)
+            # must clamp to the BEST match (index 0, matches are score-sorted
+            # descending) — never the worst. Clamping to len-1 previously served
+            # the lowest-quality/foreign copy of an episode we had in RD.
+            start = use_index if use_index < len(matches) else 0
             if start != use_index:
                 log_service.info(
                     f"RD: use_index {use_index} >= {len(matches)} match(es); "
@@ -737,7 +741,11 @@ class RDService:
 
             # Clamp (see find_episode_stream) — a climbing failover index must not
             # abandon a movie we have downloaded in RD.
-            start = use_index if use_index < len(matches) else len(matches) - 1
+            # A runaway failover index (climbs while playback keeps retrying)
+            # must clamp to the BEST match (index 0, matches are score-sorted
+            # descending) — never the worst. Clamping to len-1 previously served
+            # the lowest-quality/foreign copy of an episode we had in RD.
+            start = use_index if use_index < len(matches) else 0
             if start != use_index:
                 log_service.info(
                     f"RD: use_index {use_index} >= {len(matches)} match(es); "
