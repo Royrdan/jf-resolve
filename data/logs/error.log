@@ -1,4 +1,0 @@
-2026-08-01 20:37:55 - jfresolve.error - ERROR - RD: /torrents/addMagnet returned 451: {"error":"infringing_file","error_code":35}
-2026-08-01 20:37:55 - jfresolve.error - ERROR - RD: circuit breaker OPEN for 120s (self-imposed cap 20/60s reached). All Real-Debrid calls short-circuit until it closes.
-2026-08-01 20:37:55 - jfresolve.error - ERROR - RD: circuit breaker OPEN for 120s (repeated 429 on /torrents/addMagnet). All Real-Debrid calls short-circuit until it closes.
-2026-08-01 20:37:55 - jfresolve.error - ERROR - RD: /torrents/addMagnet returned 429: {"error":"too_many_requests"}

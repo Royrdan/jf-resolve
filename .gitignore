@@ -2,3 +2,9 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+
+# runtime data
+data/logs/
+*.log
+*.db
+*.db.bak-*
