@@ -40,6 +40,27 @@ CAM_PATTERN = re.compile(
 )
 
 
+# Release groups / tags RD's May-2026 "filter-gate" hard-blocks at addMagnet time
+# (it returns 451 infringing_file). Attempting them just burns rate budget and
+# walks us deeper into the candidate list, so we skip them BEFORE spending a
+# probe. Conservative default (well-reported groups only, not broad source tags
+# like WEB-DL which would gut the pool); tune via the `rd_blocked_release_tags`
+# DB setting. Matched as whole tokens so 'yts' can't match inside another word.
+RD_BLOCKED_RELEASE_TAGS = ["yts", "yify", "rarbg", "galaxyrg"]
+
+
+def rd_filename_blocked(name: str, tags: Optional[List[str]] = None) -> bool:
+    """True if the name carries a release tag RD is known to reject at addMagnet."""
+    tag_list = RD_BLOCKED_RELEASE_TAGS if tags is None else tags
+    if not name or not tag_list:
+        return False
+    lowered = name.lower()
+    return any(
+        re.search(rf'(?<![a-z0-9]){re.escape(t.lower())}(?![a-z0-9])', lowered)
+        for t in tag_list
+    )
+
+
 class RDService:
     """
     Queries the user's own Real-Debrid torrent library to find cached files
@@ -66,11 +87,51 @@ class RDService:
     _throttle_lock = asyncio.Lock()
     _last_call = 0.0
     MIN_INTERVAL = 0.6     # seconds between RD API calls (~100/min, well under cap)
-    MAX_RETRIES = 4        # exponential backoff attempts on HTTP 429
+    MAX_RETRIES = 2        # 429 backoff attempts before the breaker trips
+
+    # --- Hard safety rails (added after the 2026-08-01 single-IP storm) ---------
+    # RD allows 250 req/min per account and BLOCKS accounts that brute-force past
+    # 429 ("bruteforcing will leave you blocked for undefined amount of time" —
+    # api.real-debrid.com). Spacing alone isn't enough: a cache-cold play that
+    # walks many magnet candidates (each = addMagnet+info+select+delete) can still
+    # fire dozens of calls in a burst, and RD's May-2026 filter-gate 451s make it
+    # walk even further. Two rails make a storm structurally impossible:
+    #   1. Rolling-window hard cap — at most MAX_CALLS_PER_WINDOW calls per
+    #      WINDOW_SECONDS across the WHOLE process. Hitting it trips the breaker.
+    #   2. Circuit breaker — the first time RD 429s past MAX_RETRIES (or we hit our
+    #      own cap), EVERY RD call short-circuits to None for CIRCUIT_COOLDOWN
+    #      seconds, so a play fails gracefully instead of hammering the account.
+    WINDOW_SECONDS = 60.0
+    MAX_CALLS_PER_WINDOW = 45       # a single play needs ~5-20; far under RD's 250
+    CIRCUIT_COOLDOWN = 120.0        # after a 429/cap trip, pause ALL RD calls
+    _call_times: List[float] = []   # monotonic timestamps of recent calls
+    _circuit_open_until = 0.0       # monotonic deadline; > now ⇒ breaker open
+    _transport = None               # test hook: httpx transport override (mock RD)
 
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.headers = {"Authorization": f"Bearer {api_key}"}
+
+    # --- breaker helpers -------------------------------------------------------
+    @classmethod
+    def _breaker_open(cls) -> bool:
+        """True while the circuit breaker is tripped (all RD calls paused)."""
+        return time.monotonic() < cls._circuit_open_until
+
+    @classmethod
+    def _trip_breaker(cls, reason: str) -> None:
+        cls._circuit_open_until = time.monotonic() + cls.CIRCUIT_COOLDOWN
+        log_service.error(
+            f"RD: circuit breaker OPEN for {cls.CIRCUIT_COOLDOWN:.0f}s ({reason}). "
+            f"All Real-Debrid calls short-circuit until it closes."
+        )
+
+    @classmethod
+    def _reset_rails(cls) -> None:
+        """Clear all rate/breaker state — for tests and manual recovery."""
+        cls._call_times = []
+        cls._circuit_open_until = 0.0
+        cls._last_call = 0.0
 
     async def _request(self, method: str, url: str, **kwargs) -> Optional[httpx.Response]:
         """Single choke-point for every Real-Debrid API call: process-wide rate
@@ -80,19 +141,46 @@ class RDService:
         kwargs.setdefault("timeout", 10.0)
         kwargs.setdefault("headers", self.headers)
         endpoint = url.split(self.BASE_URL)[-1] or url
+
+        # Rail 2 (breaker): once RD has pushed back, stop entirely for a cooldown
+        # rather than keep hammering — this is what turns a storm into a graceful
+        # failure.
+        if RDService._breaker_open():
+            log_service.warning(
+                f"RD: breaker open — skipping {method} {endpoint} (cooling down)."
+            )
+            return None
+
         resp = None
         for attempt in range(self.MAX_RETRIES + 1):
-            # Rate limit: space out consecutive RD calls. Holding the lock across
-            # the sleep serialises callers so concurrent resolves queue instead
-            # of bursting.
+            # Rail 1 (rate): spacing + rolling-window hard cap, under one lock so
+            # concurrent resolves queue instead of bursting. A call is counted
+            # BEFORE it's made; overflowing the window trips the breaker.
             async with RDService._throttle_lock:
-                gap = time.monotonic() - RDService._last_call
+                now = time.monotonic()
+                RDService._call_times = [
+                    t for t in RDService._call_times
+                    if now - t < RDService.WINDOW_SECONDS
+                ]
+                if len(RDService._call_times) >= RDService.MAX_CALLS_PER_WINDOW:
+                    RDService._trip_breaker(
+                        f"self-imposed cap {RDService.MAX_CALLS_PER_WINDOW}/"
+                        f"{RDService.WINDOW_SECONDS:.0f}s reached"
+                    )
+                    return None
+                gap = now - RDService._last_call
                 if gap < self.MIN_INTERVAL:
                     await asyncio.sleep(self.MIN_INTERVAL - gap)
                 RDService._last_call = time.monotonic()
+                RDService._call_times.append(RDService._last_call)
 
             try:
-                async with httpx.AsyncClient(verify=False) as client:
+                client_kwargs = (
+                    {"transport": RDService._transport}
+                    if RDService._transport is not None
+                    else {"verify": False}
+                )
+                async with httpx.AsyncClient(**client_kwargs) as client:
                     resp = await client.request(method, url, **kwargs)
             except Exception as e:
                 log_service.error(
@@ -101,15 +189,20 @@ class RDService:
                 )
                 return None
 
-            if resp.status_code == 429 and attempt < self.MAX_RETRIES:
-                ra = (resp.headers.get("Retry-After") or "").strip()
-                delay = float(ra) if ra.replace(".", "", 1).isdigit() else min(2 ** attempt, 20)
-                log_service.warning(
-                    f"RD: 429 rate-limited on {endpoint}; backing off "
-                    f"{delay:.1f}s (retry {attempt + 1}/{self.MAX_RETRIES})"
-                )
-                await asyncio.sleep(delay)
-                continue
+            if resp.status_code == 429:
+                if attempt < self.MAX_RETRIES:
+                    ra = (resp.headers.get("Retry-After") or "").strip()
+                    delay = float(ra) if ra.replace(".", "", 1).isdigit() else min(2 ** attempt, 20)
+                    log_service.warning(
+                        f"RD: 429 rate-limited on {endpoint}; backing off "
+                        f"{delay:.1f}s (retry {attempt + 1}/{self.MAX_RETRIES})"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                # Retries exhausted: DON'T brute-force (RD blocks that). Trip the
+                # breaker so every subsequent call short-circuits for the cooldown.
+                RDService._trip_breaker(f"repeated 429 on {endpoint}")
+                return resp
             return resp
         return resp
 

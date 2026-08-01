@@ -17,7 +17,11 @@ from ..models.user import User
 from ..services.failover_manager import FailoverManager
 from ..services.library_service import LibraryService
 from ..services.log_service import log_service
-from ..services.rd_service import RDService
+from ..services.rd_service import (
+    RDService,
+    RD_BLOCKED_RELEASE_TAGS,
+    rd_filename_blocked,
+)
 from ..services.settings_manager import SettingsManager
 from ..services.stream_validator import (
     DEFAULT_AUDIO_DENYLIST,
@@ -452,6 +456,17 @@ async def resolve_stream(
         if rd_api_key_val and rd_resolve_enabled:
             rd_converter = RDService(rd_api_key_val)
 
+        # Safety budget for torrent-mode plays: how many candidates we'll actually
+        # push through Real-Debrid (each add-magnet costs several RD calls). The
+        # candidate loop can walk many streams for quality/validation reasons, but
+        # only this many will ever touch RD — the real cap on RD volume per play.
+        # R_BLOCKED tags are skipped BEFORE they count against this budget.
+        rd_max_probes = await settings.get("rd_max_probes", 4)
+        rd_blocked_tags = await settings.get(
+            "rd_blocked_release_tags", RD_BLOCKED_RELEASE_TAGS
+        )
+        rd_probes_used = 0
+
         # Build one flat, de-duplicated candidate list ordered as
         # requested-quality → fallback-qualities → rest. The validation-retry
         # loop below walks THIS list, so a dead link in a single-stream quality
@@ -552,6 +567,29 @@ async def resolve_stream(
                         retry_stream_url
                     )
                     if infohash and rd_converter is not None:
+                        # Skip release tags RD's filter-gate will 451 anyway —
+                        # BEFORE they eat into the probe budget. (torrent-mode
+                        # only: a debrid-mode ref still has a playable addon URL.)
+                        if is_torrent_mode and rd_filename_blocked(
+                            fname, rd_blocked_tags
+                        ):
+                            log_service.info(
+                                f"RD: skipping blocked release tag for "
+                                f"{state_key} ({(fname or '')[:60]}) — RD would "
+                                f"reject it (filter-gate)."
+                            )
+                            continue
+                        # Hard cap on how many candidates ever touch RD per play.
+                        # Once spent, stop probing rather than walk the whole list.
+                        if is_torrent_mode and rd_probes_used >= rd_max_probes:
+                            log_service.warning(
+                                f"RD probe budget ({rd_max_probes}) spent for "
+                                f"{state_key} — no cached source found, stopping "
+                                f"(protects the account)."
+                            )
+                            break
+                        if is_torrent_mode:
+                            rd_probes_used += 1
                         direct = await rd_converter.resolve_infohash(
                             infohash, season, episode, filename_hint=fname
                         )

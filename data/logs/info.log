@@ -370,3 +370,110 @@
 2026-01-12 21:56:40 - jfresolve.info - INFO - Fetching Stremio streams from: https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex|qualityfilter=brremux,scr,cam|limit=1|debridoptions=nodownloadlinks,nocatalog|realdebrid=DARCYRADYLTC6YLMAZAKI4UD7RAYC2QZE4CYETZSDVCBYN4FDZLQ/stream/series/tt6470478:1:5.json
 2026-01-12 21:56:40 - jfresolve.info - INFO - Received 4 streams for episode tt6470478:1:5
 2026-01-12 21:56:40 - jfresolve.info - INFO - Requested index 1 out of range for quality 1080p. Falling back to index 0.
+2026-08-01 20:37:51 - jfresolve.info - INFO - RD: fetched 0 torrents from library
+2026-08-01 20:37:53 - jfresolve.info - INFO - RD: fetched 0 torrents from library
+2026-08-01 20:37:54 - jfresolve.info - INFO - RD: infohash bb000000 not cached (status=downloading), falling back to addon URL
+2026-08-01 20:37:54 - jfresolve.info - INFO - RD: fetched 0 torrents from library
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: fetched 0 torrents from library
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: infohash dd000000 not cached (status=downloading), falling back to addon URL
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: infohash dd000000 not cached (status=downloading), falling back to addon URL
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: infohash dd000000 not cached (status=downloading), falling back to addon URL
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: infohash dd000000 not cached (status=downloading), falling back to addon URL
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: infohash dd000000 not cached (status=downloading), falling back to addon URL
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: infohash dd000000 not cached (status=downloading), falling back to addon URL
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping DELETE /torrents/delete/t7 (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: fetched 0 torrents from library
+2026-08-01 20:37:55 - jfresolve.info - INFO - RD: using cached torrent list (0 items)
+2026-08-01 20:37:55 - jfresolve.info - WARNING - RD: breaker open — skipping POST /torrents/addMagnet (cooling down).
