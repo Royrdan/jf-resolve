@@ -108,6 +108,18 @@ class RDService:
     _circuit_open_until = 0.0       # monotonic deadline; > now ⇒ breaker open
     _transport = None               # test hook: httpx transport override (mock RD)
 
+    # Uncached torrents: RD must pull the torrent before it's playable. Popular,
+    # well-seeded releases flip to "downloaded" in 1-2s ("downloaded straight
+    # away"), so give RD a short BOUNDED window to finish instead of skipping the
+    # instant we look. A torrent that's still not ready after the window is KEPT
+    # (not deleted) so it keeps downloading and the next press plays it — the
+    # "just slower" experience, not a hard fail. Each poll is one get_torrent_info;
+    # the rate cap + per-play probe budget bound total volume across candidates.
+    POLL_ATTEMPTS = 3               # status re-checks after the first read
+    POLL_INTERVAL = 2.5             # seconds between polls → ~8s ready window
+    # Statuses that will never become playable → delete rather than keep.
+    DEAD_STATUSES = frozenset({"magnet_error", "error", "virus", "dead"})
+
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.headers = {"Authorization": f"Bearer {api_key}"}
@@ -455,9 +467,11 @@ class RDService:
         library entry for the same hash when present, else adds the magnet,
         selects files, picks the file for the requested episode, and unrestricts.
 
-        Returns None when the torrent is not RD-cached (would need a download)
-        or no suitable file is found — the caller should then fall back to the
-        addon's own resolve URL.
+        Cached torrents play instantly; uncached-but-well-seeded ones are given a
+        short bounded poll window to finish (POLL_ATTEMPTS × POLL_INTERVAL) and
+        then play. Returns None when the torrent is still not ready after the
+        window (left downloading on the account for a retry), is dead, or no
+        suitable file matches — the caller skips to the next candidate.
         """
         infohash = infohash.lower()
 
@@ -486,14 +500,40 @@ class RDService:
                 await self.delete_torrent(torrent_id)
             return None
 
-        # Only instantly-playable (cached) torrents are usable for streaming.
-        if info.get("status") != "downloaded":
+        # Wait (bounded) for RD to make the torrent playable. Cached torrents are
+        # already "downloaded" (loop body never runs). Uncached-but-well-seeded
+        # ones flip to "downloaded" within a couple of seconds; we poll a few
+        # times to catch them. Genuinely-stuck torrents are KEPT downloading (not
+        # deleted) so a retry plays them — only truly-dead statuses are removed.
+        status = (info or {}).get("status")
+        polls = 0
+        while status != "downloaded" and polls < self.POLL_ATTEMPTS:
+            if status in self.DEAD_STATUSES:
+                log_service.info(
+                    f"RD: infohash {infohash[:8]} status={status} "
+                    f"(will never download) — removing."
+                )
+                if added:
+                    await self.delete_torrent(torrent_id)
+                return None
+            if status == "waiting_files_selection":
+                # Late file-selection (e.g. after magnet_conversion) — kick it.
+                await self.select_all_files(torrent_id)
+            else:
+                await asyncio.sleep(self.POLL_INTERVAL)
+            self._info_cache.pop(torrent_id, None)  # force a fresh status read
+            info = await self.get_torrent_info(torrent_id) or info
+            status = (info or {}).get("status")
+            polls += 1
+
+        if status != "downloaded":
+            # Not ready after the window. Leave it downloading on the account
+            # (do NOT delete) so a retry shortly finds it cached — "just slower".
             log_service.info(
-                f"RD: infohash {infohash[:8]} not cached "
-                f"(status={info.get('status')}), falling back to addon URL"
+                f"RD: infohash {infohash[:8]} not ready yet (status={status}) "
+                f"after {self.POLL_ATTEMPTS} polls — kept downloading, skipping "
+                f"this candidate for now."
             )
-            if added:
-                await self.delete_torrent(torrent_id)
             return None
 
         link = self._pick_link(info, season, episode, filename_hint)
