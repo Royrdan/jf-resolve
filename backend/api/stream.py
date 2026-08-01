@@ -5,7 +5,7 @@ import re
 import time
 from datetime import datetime
 from typing import Optional
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -67,6 +67,48 @@ def _parse_torrentio_url(url: str):
     if not m:
         return None, None
     return m.group(1).lower(), unquote(m.group(2))
+
+
+# Video-quality ordering so the subtitle hunt never demotes resolution. Higher
+# rank = better picture. Mirrors StremioService.detect_quality buckets.
+_QUALITY_RANK = {
+    "cam": 0, "unknown": 1, "480p": 2, "720p": 3,
+    "1080p": 4, "1440p": 5, "4k": 6,
+}
+
+
+def _synth_torrent_ref(infohash: str, file_idx, name: str) -> str:
+    """Synthetic candidate ref for TORRENT-MODE scraper results.
+
+    When a scraper is configured without a debrid key it returns infoHash +
+    fileIdx instead of a playable URL. We wrap those into
+    ``torrent://<infohash>/<fileIdx>?name=<url-encoded name>``. These refs are
+    NEVER playable directly — they MUST go through our own single-IP,
+    cached-only RD conversion. That is exactly what keeps our RD key off the
+    scraper's servers and out of the multi-IP ban pattern.
+    """
+    idx = file_idx if file_idx is not None else ""
+    return f"torrent://{infohash.lower()}/{idx}?name={quote(name or '')}"
+
+
+def _parse_stream_ref(url: str):
+    """Return (infohash, file_idx, name, is_torrent_mode) for a candidate ref.
+
+    Handles both our synthetic ``torrent://`` refs (torrent-mode: single-IP RD
+    conversion is mandatory, cached-only, no raw fallback) and legacy torrentio
+    ``/resolve/`` URLs (debrid-mode: a playable raw URL exists as a fallback).
+    Returns (None, None, None, False) for a plain playable URL with no
+    extractable infohash.
+    """
+    if url.startswith("torrent://"):
+        rest = url[len("torrent://"):]
+        path, _, query = rest.partition("?")
+        infohash, _, idx = path.partition("/")
+        name = unquote(query[len("name="):]) if query.startswith("name=") else ""
+        file_idx = int(idx) if idx.isdigit() else None
+        return infohash.lower(), file_idx, name, True
+    infohash, name = _parse_torrentio_url(url)
+    return infohash, None, name, False
 
 
 @router.api_route("/resolve/{media_type}/{tmdb_id}", methods=["GET", "HEAD"])
@@ -349,6 +391,19 @@ async def resolve_stream(
                 episode=episode if media_type == "tv" else None,
             )
 
+        # Normalise TORRENT-MODE scraper results into synthetic candidate refs
+        # so the rest of the pipeline is source-shape-agnostic. When a scraper is
+        # given no debrid key it returns infoHash + fileIdx and no playable
+        # `url`; wrap those so ordered_candidates/selection can carry them and the
+        # resolve loop routes them through our single-IP cached-only RD path.
+        # Debrid-mode streams already have a playable `url` and are left as-is.
+        for s in streams:
+            if not s.get("url") and s.get("infoHash"):
+                s["url"] = _synth_torrent_ref(
+                    s["infoHash"], s.get("fileIdx"),
+                    s.get("title") or s.get("name") or "",
+                )
+
         # Drop cam-tier sources entirely (default on). Better a clean 404 than
         # streaming a camcorder rip of something still in cinemas.
         if block_cam:
@@ -464,6 +519,12 @@ async def resolve_stream(
         # foreign-dub source, so the exhausted-retries fallback 404s instead of
         # serving one of those (better "unavailable" than a camcorder/dub).
         saw_unacceptable = False
+        # Subtitle hunt state: hold the BEST-quality playable candidate that
+        # lacked a usable embedded subtitle while we scan up to 3 candidates for
+        # one that has subs. Quality is never demoted to get a subtitle.
+        held_no_sub_url = None
+        held_no_sub_rank = -1
+        sub_scans = 0
         async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
             for retry in range(MAX_EPISODE_RETRIES + 1):
                 if retry > 0:
@@ -487,23 +548,42 @@ async def resolve_stream(
                     # directly (range-capable, reconnect-safe). On failure we
                     # keep the addon URL and proceed as before.
                     play_url = retry_stream_url
-                    if rd_converter is not None:
-                        infohash, fname = _parse_torrentio_url(retry_stream_url)
-                        if infohash:
-                            direct = await rd_converter.resolve_infohash(
-                                infohash, season, episode, filename_hint=fname
+                    infohash, _file_idx, fname, is_torrent_mode = _parse_stream_ref(
+                        retry_stream_url
+                    )
+                    if infohash and rd_converter is not None:
+                        direct = await rd_converter.resolve_infohash(
+                            infohash, season, episode, filename_hint=fname
+                        )
+                        if direct:
+                            log_service.stream(
+                                f"RD-converted infohash {infohash[:8]} for "
+                                f"{state_key} → {direct[:80]}..."
                             )
-                            if direct:
-                                log_service.stream(
-                                    f"RD-converted infohash {infohash[:8]} for "
-                                    f"{state_key} → {direct[:80]}..."
-                                )
-                                play_url = direct
-                            else:
-                                log_service.info(
-                                    f"RD conversion unavailable for infohash "
-                                    f"{infohash[:8]}, using addon URL"
-                                )
+                            play_url = direct
+                        elif is_torrent_mode:
+                            # Torrent-mode ref with no cached RD copy: there is no
+                            # playable raw URL to fall back to (it's just a
+                            # magnet). Cached-only policy — skip to the next
+                            # candidate rather than serve/queue a download.
+                            log_service.info(
+                                f"RD: infohash {infohash[:8]} not cached for "
+                                f"{state_key} — skipping (cached-only)."
+                            )
+                            continue
+                        else:
+                            log_service.info(
+                                f"RD conversion unavailable for infohash "
+                                f"{infohash[:8]}, using addon URL"
+                            )
+                    elif is_torrent_mode:
+                        # Torrent-mode but RD converter disabled/unavailable: a
+                        # magnet ref is unplayable, so this candidate is unusable.
+                        log_service.warning(
+                            f"Torrent-mode candidate but no RD converter for "
+                            f"{state_key} — skipping."
+                        )
+                        continue
 
                     skip_head = any(
                         d in play_url
@@ -609,28 +689,45 @@ async def resolve_stream(
                             f"subs={probe.sub_langs} dur={probe.duration}"
                         )
 
-                        # Subtitle preference (soft, ZERO extra probing): the
-                        # candidate walk is already quality-ordered, so the first
-                        # playable, correct-language source is the best available.
-                        # We accept it immediately and NEVER probe further
-                        # candidates hunting for an embedded subtitle track — these
-                        # releases rarely carry one, and every extra probe is an RD
-                        # unrestrict + ffprobe that slows the resolve and hammers
-                        # Real-Debrid. Subtitles are only noted; players (Jellyfin,
-                        # Infuse, etc.) fetch external subs regardless.
+                        # Subtitle preference (soft): prefer a source carrying a
+                        # usable subtitle track, but scan at most 3 playable
+                        # candidates and NEVER demote video quality to get one.
+                        # Any track counts as usable — untagged ('')/'und' tracks
+                        # are almost always English on English releases. Bounding
+                        # the hunt at 3 keeps our own (single-IP) RD unrestrict
+                        # volume low while still finding embedded subs when close.
                         if prefer_subtitles and _pref_sub_set:
                             has_pref_sub = any(
                                 (lang in _pref_sub_set) or lang in ("", "und", None)
                                 for lang in probe.sub_langs
                             )
                             if not has_pref_sub:
-                                log_service.info(
-                                    f"Accepting best playable source for "
-                                    f"{state_key} (no embedded subtitle track; "
-                                    f"player will source subs externally)."
+                                cand_rank = _QUALITY_RANK.get(
+                                    stremio.detect_quality(
+                                        {"title": resolved_name or resolved}
+                                    ),
+                                    1,
                                 )
+                                # Hold the best-quality sub-less source and keep
+                                # scanning; a lower-res subbed source can never
+                                # displace it.
+                                if held_no_sub_url is None or cand_rank > held_no_sub_rank:
+                                    held_no_sub_url = resolved
+                                    held_no_sub_rank = cand_rank
+                                sub_scans += 1
+                                if sub_scans >= 3:
+                                    log_service.info(
+                                        f"Subtitle hunt capped at 3 scans for "
+                                        f"{state_key}; serving best-quality "
+                                        f"playable source (external subs)."
+                                    )
+                                    final_url = held_no_sub_url
+                                    break
+                                # Keep looking for a subtitled candidate.
+                                continue
 
-                    # Correct episode (or movie/unknown) and playable — accept the
+                    # Correct episode (or movie/unknown), playable, and either
+                    # subtitle-satisfied or subtitles not required — accept this
                     # first (best-quality) acceptable source.
                     final_url = resolved
                     break
@@ -641,6 +738,12 @@ async def resolve_stream(
                         f"[{type(e).__name__}]: {e}"
                     )
                     continue
+
+        # Subtitle hunt ended without a subtitled candidate (ran out of
+        # candidates before the 3-scan cap): serve the best-quality sub-less
+        # source we held.
+        if final_url is None and held_no_sub_url is not None:
+            final_url = held_no_sub_url
 
         if final_url:
             RESOLVE_CACHE[cache_key] = (time.time(), final_url)
@@ -655,8 +758,9 @@ async def resolve_stream(
                 status_code=404,
                 detail="Only cam-tier or foreign-dub sources available (blocked)",
             )
-        else:
-            # All retries exhausted — serve the last resolved stream URL as a fallback
+        elif retry_stream_url and not retry_stream_url.startswith("torrent://"):
+            # Debrid-mode only: serve the last resolved addon URL as a fallback.
+            # (Torrent-mode refs are unplayable magnets, so they never land here.)
             final_url = retry_stream_url
             log_service.warning(
                 f"All stream retries exhausted for {state_key}. "
@@ -665,6 +769,15 @@ async def resolve_stream(
             state.current_index = retry_index + 1
             state.attempt_count += 1
             await failover.update_state(state)
+        else:
+            # Torrent-mode: nothing cached and playable across all candidates.
+            log_service.warning(
+                f"No cached, playable source for {state_key} across "
+                f"{retry_index + 1} candidate(s) — returning 404."
+            )
+            raise HTTPException(
+                status_code=404, detail="No cached playable source available"
+            )
 
         return RedirectResponse(url=final_url, status_code=302)
 
