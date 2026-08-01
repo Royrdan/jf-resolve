@@ -20,6 +20,20 @@ CAM_PATTERN = re.compile(
     r'scr|screener|dvdscr|dcp|dcprip|pdvd|predvd|korsub|md)\b'
 )
 
+# Fake-quality (AI upscale) and non-video (archive) markers — kept in sync with
+# rd_service.UPSCALE_PATTERN / ARCHIVE_EXT_PATTERN. Streams matching these are
+# pushed to the BOTTOM of the candidate order (last resort), so a genuine 1080p
+# is always tried before a fake-4K upscale or a .rar archive.
+_UPSCALE_PATTERN = re.compile(r"\b(?:ai[\s._\-]*)?upscal(?:e|ed|ing)\b", re.IGNORECASE)
+_ARCHIVE_EXT_PATTERN = re.compile(
+    r"\.(?:rar|zip|7z|tar|gz|bz2|r\d{2,3}|z\d{2}|\d{3})$", re.IGNORECASE
+)
+
+
+def _is_deprioritised_stream(stream: Dict) -> bool:
+    text = f"{stream.get('title', '')} {stream.get('name', '')}"
+    return bool(_UPSCALE_PATTERN.search(text) or _ARCHIVE_EXT_PATTERN.search(text))
+
 
 class StremioService:
     """Stremio addon manifest integration"""
@@ -474,8 +488,13 @@ class StremioService:
         seen = set()
         urls: List[str] = []
 
+        # Genuine streams first, in quality order; fake-4K upscales and .rar
+        # archives are held back and appended only at the very end (last resort).
+        primary = [s for s in streams if not _is_deprioritised_stream(s)]
+        deprioritised = [s for s in streams if _is_deprioritised_stream(s)]
+
         for q in ordered_qualities:
-            q_streams = [s for s in streams if self.detect_quality(s) == q]
+            q_streams = [s for s in primary if self.detect_quality(s) == q]
             if season is not None and episode is not None and q_streams:
                 q_streams = self._sort_by_episode_specificity(
                     q_streams, season, episode
@@ -488,9 +507,9 @@ class StremioService:
 
         # Catch-all: include any streams whose detected quality wasn't in the
         # ordered list (only when fallback is enabled — better a wrong-quality
-        # playable stream than nothing).
+        # playable stream than nothing). Genuine first, then de-prioritised last.
         if fallback_enabled:
-            for s in streams:
+            for s in primary + deprioritised:
                 url = s.get("url")
                 if url and url not in seen:
                     seen.add(url)

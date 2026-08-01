@@ -59,6 +59,7 @@ _rd = _load("backend.services.rd_service", _SERVICES / "rd_service.py")
 RDService = _rd.RDService
 rd_filename_blocked = _rd.rd_filename_blocked
 RD_BLOCKED_RELEASE_TAGS = _rd.RD_BLOCKED_RELEASE_TAGS
+deprioritise_penalty = _rd.deprioritise_penalty
 
 BASE = RDService.BASE_URL
 
@@ -82,9 +83,10 @@ class MockRD:
     Counts every HTTP call so tests can assert the rails bounded the volume.
     """
 
-    def __init__(self, behavior=None, library=None):
+    def __init__(self, behavior=None, library=None, lib_info=None):
         self.behavior = behavior or {}
         self.library = library or []          # GET /torrents entries
+        self.lib_info = lib_info or {}         # library id -> /torrents/info body
         self.calls = []                       # (method, path) of every hit
         self._t = {}                           # id -> torrent state
         self._seq = 0
@@ -140,6 +142,8 @@ class MockRD:
         # GET /torrents/info/{id}
         if method == "GET" and "/torrents/info/" in path:
             tid = path.rsplit("/", 1)[-1]
+            if tid in self.lib_info:                 # pre-existing library entry
+                return httpx.Response(200, json=self.lib_info[tid])
             t = self._t.get(tid)
             if t is None:
                 return httpx.Response(404, json={"error": "unknown_ressource"})
@@ -163,10 +167,13 @@ class MockRD:
                                                  "files": [], "links": []})
             return httpx.Response(200, json=self._downloaded_body())
 
-        # POST /unrestrict/link
+        # POST /unrestrict/link  → echo which hoster link (file) was chosen
         if method == "POST" and path.endswith("/unrestrict/link"):
+            body = parse_qs(request.content.decode())
+            link = body.get("link", ["?"])[0]
+            tail = link.rsplit("/", 1)[-1] or "FILE"
             return httpx.Response(200, json={
-                "download": "https://download.real-debrid.com/d/ABC/Movie.mkv"})
+                "download": f"https://download.real-debrid.com/d/{tail}"})
 
         # DELETE /torrents/delete/{id}
         if method == "DELETE" and "/torrents/delete/" in path:
@@ -220,7 +227,7 @@ async def test_cached_resolves():
     deleted = any(m == "DELETE" for m, _ in mock.calls)
     _teardown()
     check("cached torrent resolves to a CDN link",
-          url == "https://download.real-debrid.com/d/ABC/Movie.mkv",
+          url == "https://download.real-debrid.com/d/HOSTERLINK",
           f"got {url!r}")
     check("cached play makes no DELETE call", not deleted)
 
@@ -235,7 +242,7 @@ async def test_slow_becomes_ready():
     deleted = any(m == "DELETE" for m, _ in mock.calls)
     _teardown()
     check("uncached-but-quick torrent becomes playable (polls, then plays)",
-          url == "https://download.real-debrid.com/d/ABC/Movie.mkv",
+          url == "https://download.real-debrid.com/d/HOSTERLINK",
           f"got {url!r}")
     check("a torrent that became ready is NOT deleted", not deleted)
 
@@ -331,6 +338,49 @@ def test_filename_blocked():
           not rd_filename_blocked("ytstuff.and.things.mkv", tags))
 
 
+def test_deprioritise_penalty_helper():
+    # Fake-4K AI upscale and archive files get a big penalty; genuine files 0.
+    check("AI upscale gets a de-prioritise penalty",
+          deprioritise_penalty("SNL.S51E19.2160p.HDR.Ai.Upscale-Mesc.mkv") > 0)
+    check(".rar archive gets a de-prioritise penalty",
+          deprioritise_penalty("Movie.2020.2160p.part1.rar") > 0)
+    check("split-archive .r00 gets a penalty",
+          deprioritise_penalty("Movie.2020.1080p.r00") > 0)
+    check("genuine 1080p release gets NO penalty",
+          deprioritise_penalty("SNL.S51E19.1080p.HEVC.x265-MeGusta.mkv") == 0)
+    check("a real 4K release is NOT penalised (only fake upscales are)",
+          deprioritise_penalty("Movie.2020.2160p.BluRay.x265-TERMINAL.mkv") == 0)
+
+
+async def test_find_episode_prefers_real_1080_over_fake_4k():
+    """The exact 2026-08-01 SNL case: the RD library holds a fake-4K 'Ai Upscale'
+    AND a genuine 1080p for the same episode. find_episode_stream must pick the
+    genuine 1080p, not the higher-'quality' upscale."""
+    library = [{"id": "lib1", "hash": "a" * 40,
+                "filename": "Saturday Night Live S51E19 Matt Damon MULTI"}]
+    lib_info = {"lib1": {
+        "status": "downloaded",
+        "files": [
+            {"id": 1, "path": "/SNL.S51E19.Matt.Damon.2160p.HDR.Ai.Upscale-Mesc.mkv",
+             "bytes": 900, "selected": 1},
+            {"id": 2, "path": "/SNL.S51E19.Matt.Damon.1080p.HEVC.x265-MeGusta.mkv",
+             "bytes": 800, "selected": 1},
+        ],
+        # links pair with selected files in order → link[0]=upscale, link[1]=1080p
+        "links": ["https://real-debrid.com/d/L_UPSCALE",
+                  "https://real-debrid.com/d/L_1080"],
+    }}
+    mock = MockRD(library=library, lib_info=lib_info)
+    _install(mock)
+    rd = RDService("fake-key")
+    url = await rd.find_episode_stream(
+        "Saturday Night Live", 51, 19, preferred_quality="4k")
+    _teardown()
+    check("fake-4K upscale is de-prioritised; genuine 1080p is served",
+          url is not None and url.endswith("L_1080"),
+          f"got {url!r}")
+
+
 # ---------------------------------------------------------------------------
 async def main():
     print("Mock-RD safety tests (no network, no account touched):")
@@ -342,6 +392,8 @@ async def main():
     await test_hard_cap_bounds_a_storm()
     await test_429_trips_breaker()
     test_filename_blocked()
+    test_deprioritise_penalty_helper()
+    await test_find_episode_prefers_real_1080_over_fake_4k()
 
     passed = sum(1 for _, ok, _ in _results if ok)
     total = len(_results)

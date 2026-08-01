@@ -49,6 +49,31 @@ CAM_PATTERN = re.compile(
 RD_BLOCKED_RELEASE_TAGS = ["yts", "yify", "rarbg", "galaxyrg"]
 
 
+# Fake-quality and non-video releases we don't want auto-picked over a genuine
+# source. NOT hard-skipped — heavily penalised so they sort to the bottom and
+# only ever serve as a last resort (an archive then just fails ffprobe cleanly,
+# and a fake-4K upscale loses to a real 1080p). Covers the 2026-08-01 SNL case:
+# a "2160p HDR Ai Upscale" release that unrestricted to a .rar.
+UPSCALE_PATTERN = re.compile(r"\b(?:ai[\s._\-]*)?upscal(?:e|ed|ing)\b", re.IGNORECASE)
+ARCHIVE_EXT_PATTERN = re.compile(
+    r"\.(?:rar|zip|7z|tar|gz|bz2|r\d{2,3}|z\d{2}|\d{3})$", re.IGNORECASE
+)
+DEPRIORITISE_PENALTY = 20.0  # larger than the whole real-score spread (~6-10)
+
+
+def deprioritise_penalty(name: str) -> float:
+    """Score penalty that pushes fake-quality (AI upscale) and non-video
+    (archive) files to the bottom of the match ranking without excluding them."""
+    if not name:
+        return 0.0
+    pen = 0.0
+    if UPSCALE_PATTERN.search(name):
+        pen += DEPRIORITISE_PENALTY
+    if ARCHIVE_EXT_PATTERN.search(name):
+        pen += DEPRIORITISE_PENALTY
+    return pen
+
+
 def rd_filename_blocked(name: str, tags: Optional[List[str]] = None) -> bool:
     """True if the name carries a release tag RD is known to reject at addMagnet."""
     tag_list = RD_BLOCKED_RELEASE_TAGS if tags is None else tags
@@ -699,7 +724,7 @@ class RDService:
                     )
                     continue
 
-                score = 10 - abs(q_rank - pref_rank)
+                score = 10 - abs(q_rank - pref_rank) - deprioritise_penalty(file_path)
 
                 log_service.info(
                     f"RD: episode match — {files[file_idx].get('path')} "
@@ -867,7 +892,7 @@ class RDService:
                     )
                     continue
 
-                score = 10 - abs(q_rank - pref_rank)
+                score = 10 - abs(q_rank - pref_rank) - deprioritise_penalty(file_path)
 
                 log_service.info(
                     f"RD: movie match — {files[file_idx].get('path')} "
