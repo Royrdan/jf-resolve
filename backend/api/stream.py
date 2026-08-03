@@ -580,40 +580,56 @@ async def resolve_stream(
                             )
                             continue
                         # Hard cap on how many candidates ever touch RD per play.
-                        # Once spent, stop probing rather than walk the whole list.
-                        if is_torrent_mode and rd_probes_used >= rd_max_probes:
+                        # Each uncached probe costs several RD calls (addMagnet +
+                        # info + select + status polls); walking a long candidate
+                        # list blows the self-imposed rate cap and trips the
+                        # breaker, which then locks RD out for the whole cooldown
+                        # — so every play during that window fails. Once the
+                        # budget is spent we STOP calling RD: torrent-mode has no
+                        # playable raw URL so it ends the walk, while debrid-mode
+                        # keeps walking but plays the torrentio addon URL as-is.
+                        rd_budget_spent = rd_probes_used >= rd_max_probes
+                        if is_torrent_mode and rd_budget_spent:
                             log_service.warning(
                                 f"RD probe budget ({rd_max_probes}) spent for "
                                 f"{state_key} — no cached source found, stopping "
                                 f"(protects the account)."
                             )
                             break
-                        if is_torrent_mode:
-                            rd_probes_used += 1
-                        direct = await rd_converter.resolve_infohash(
-                            infohash, season, episode, filename_hint=fname
-                        )
-                        if direct:
-                            log_service.stream(
-                                f"RD-converted infohash {infohash[:8]} for "
-                                f"{state_key} → {direct[:80]}..."
-                            )
-                            play_url = direct
-                        elif is_torrent_mode:
-                            # Torrent-mode ref with no cached RD copy: there is no
-                            # playable raw URL to fall back to (it's just a
-                            # magnet). Cached-only policy — skip to the next
-                            # candidate rather than serve/queue a download.
+                        if rd_budget_spent:
+                            # debrid-mode: budget spent — leave RD alone and play
+                            # the addon URL for the remaining candidates.
                             log_service.info(
-                                f"RD: infohash {infohash[:8]} not cached for "
-                                f"{state_key} — skipping (cached-only)."
+                                f"RD probe budget ({rd_max_probes}) spent for "
+                                f"{state_key} — using addon URL without RD "
+                                f"conversion (protects the account)."
                             )
-                            continue
                         else:
-                            log_service.info(
-                                f"RD conversion unavailable for infohash "
-                                f"{infohash[:8]}, using addon URL"
+                            rd_probes_used += 1
+                            direct = await rd_converter.resolve_infohash(
+                                infohash, season, episode, filename_hint=fname
                             )
+                            if direct:
+                                log_service.stream(
+                                    f"RD-converted infohash {infohash[:8]} for "
+                                    f"{state_key} → {direct[:80]}..."
+                                )
+                                play_url = direct
+                            elif is_torrent_mode:
+                                # Torrent-mode ref with no cached RD copy: there is
+                                # no playable raw URL to fall back to (it's just a
+                                # magnet). Cached-only policy — skip to the next
+                                # candidate rather than serve/queue a download.
+                                log_service.info(
+                                    f"RD: infohash {infohash[:8]} not cached for "
+                                    f"{state_key} — skipping (cached-only)."
+                                )
+                                continue
+                            else:
+                                log_service.info(
+                                    f"RD conversion unavailable for infohash "
+                                    f"{infohash[:8]}, using addon URL"
+                                )
                     elif is_torrent_mode:
                         # Torrent-mode but RD converter disabled/unavailable: a
                         # magnet ref is unplayable, so this candidate is unusable.
