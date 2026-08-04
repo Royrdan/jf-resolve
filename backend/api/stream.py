@@ -1,5 +1,6 @@
 """Stream resolution API routes"""
 
+import asyncio
 import httpx
 import re
 import time
@@ -57,6 +58,39 @@ def _filename_from_url(url: str) -> str:
 # Cache for resolved URLs: {key: (timestamp, url)}
 RESOLVE_CACHE = {}
 RESOLVE_CACHE_TTL = 3600  # 60 minutes
+
+# In-flight coalescing. Jellyfin fires the SAME resolve request several times in
+# a few seconds (observed: 7 dup requests for one episode in ~45s). Without this,
+# each duplicate independently walks all RD candidates in parallel — the bursts
+# stacked up and tripped RD's rate breaker mid-play, so the first press failed and
+# only the second (RD cache now warm) played. A per-key asyncio lock makes the
+# duplicates queue: the leader does the one RD walk and fills RESOLVE_CACHE; the
+# followers wake, hit that cache, and return instantly instead of hammering RD.
+# Locks are ref-counted so the registry doesn't grow unbounded.
+_RESOLVE_LOCKS: dict = {}
+_RESOLVE_LOCK_REFS: dict = {}
+
+
+def _acquire_resolve_lock(key: str):
+    """Return the per-key lock, bumping its refcount. Single event loop → the
+    get/create + refcount bump run without an await, so no race."""
+    lock = _RESOLVE_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _RESOLVE_LOCKS[key] = lock
+    _RESOLVE_LOCK_REFS[key] = _RESOLVE_LOCK_REFS.get(key, 0) + 1
+    return lock
+
+
+def _drop_resolve_lock(key: str):
+    """Decrement the refcount; drop the lock from the registry once nobody holds
+    a reference to it."""
+    n = _RESOLVE_LOCK_REFS.get(key, 1) - 1
+    if n <= 0:
+        _RESOLVE_LOCK_REFS.pop(key, None)
+        _RESOLVE_LOCKS.pop(key, None)
+    else:
+        _RESOLVE_LOCK_REFS[key] = n
 
 # Matches a torrentio /resolve/ URL → captures (infohash, filename). Used to
 # convert the addon's volatile resolve URL into a stable RD direct link.
@@ -177,7 +211,28 @@ async def resolve_stream(
 
     failover = FailoverManager(db)
 
+    # Coalesce duplicate concurrent resolves for this exact key (see registry
+    # above). Acquired as the first thing in the try so the finally always
+    # releases it; released only if we actually took it.
+    resolve_lock = _acquire_resolve_lock(cache_key)
+    lock_held = False
+    stremio = None  # hoisted: the finally references it, and the coalesced
+                    # cache-hit can return before its in-body assignment
+
     try:
+        await resolve_lock.acquire()
+        lock_held = True
+
+        # Re-check the cache under the lock: while we waited, the leader for this
+        # key may have just resolved and cached it — serve that and skip the walk.
+        if cache_key in RESOLVE_CACHE:
+            ts, cached_url = RESOLVE_CACHE[cache_key]
+            if time.time() - ts < RESOLVE_CACHE_TTL:
+                log_service.info(
+                    f"Coalesced resolve for {cache_key} — serving leader's cached URL"
+                )
+                return RedirectResponse(url=cached_url, status_code=302)
+
         if media_type == "movie":
             state_key = f"movie:{tmdb_id}"
         else:
@@ -843,6 +898,9 @@ async def resolve_stream(
             status_code=500, detail=f"Failed to resolve stream: {str(e)}"
         )
     finally:
+        if lock_held:
+            resolve_lock.release()
+        _drop_resolve_lock(cache_key)
         if tmdb:
             await tmdb.close()
         if stremio:

@@ -127,7 +127,15 @@ class RDService:
     #      own cap), EVERY RD call short-circuits to None for CIRCUIT_COOLDOWN
     #      seconds, so a play fails gracefully instead of hammering the account.
     WINDOW_SECONDS = 60.0
-    MAX_CALLS_PER_WINDOW = 45       # a single play needs ~5-20; far under RD's 250
+    # MIN_INTERVAL (0.6s) already caps throughput at ~100 calls/min since every RD
+    # call serialises on _throttle_lock, so this cap only ever fires on genuine
+    # pathology, not a normal cache-cold walk. It was set to 45 in panic after the
+    # 2026-08-01 storm and became the thing that self-tripped the breaker mid-play
+    # (a burst of Jellyfin duplicate resolves stacked calls before the 60s window
+    # rolled). Request coalescing (stream.py) now collapses those duplicates, and
+    # 120 leaves headroom for two different titles resolving at once — still well
+    # under RD's 250/min. Genuine RD 429s still trip the breaker (Rail 2).
+    MAX_CALLS_PER_WINDOW = 120      # a single play needs ~5-20; ceiling is ~100/min
     CIRCUIT_COOLDOWN = 120.0        # after a 429/cap trip, pause ALL RD calls
     _call_times: List[float] = []   # monotonic timestamps of recent calls
     _circuit_open_until = 0.0       # monotonic deadline; > now ⇒ breaker open
