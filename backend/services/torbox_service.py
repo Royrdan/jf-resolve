@@ -191,6 +191,22 @@ class TorBoxService:
     def _file_name(f: Dict) -> str:
         return f.get("name") or f.get("short_name") or ""
 
+    # Real video containers only. TorBox returns the WHOLE torrent file list
+    # (incl. .nfo/.srt/.jpg/sample), and a sidecar like
+    # "Show.S01E07.1080p.x265-ELiTE.nfo" matches BOTH the episode pattern and a
+    # quality token — so without this guard the picker can hand back a .nfo,
+    # which then fails ffprobe. RD's parallel path is shielded by its links
+    # array; TorBox needs the extension check explicitly.
+    _VIDEO_EXTS = frozenset({
+        "mkv", "mp4", "avi", "m4v", "mov", "ts", "m2ts", "wmv",
+        "flv", "webm", "mpg", "mpeg", "vob", "divx", "ogm",
+    })
+
+    @classmethod
+    def _is_video_file(cls, name: str) -> bool:
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        return ext in cls._VIDEO_EXTS
+
     def _pick_file_id(
         self,
         files: List[Dict],
@@ -203,9 +219,11 @@ class TorBoxService:
         guess an episode)."""
         if not files:
             return None
+        # Video files only, then drop extras/samples.
+        vids = [f for f in files if self._is_video_file(self._file_name(f))] or files
         candidates = [
-            f for f in files if not RDService._is_extras_path(self._file_name(f))
-        ] or files
+            f for f in vids if not RDService._is_extras_path(self._file_name(f))
+        ] or vids
 
         if season is not None and episode is not None:
             ep_pat = RDService._episode_pattern(season, episode)
@@ -316,6 +334,8 @@ class TorBoxService:
             name = self._file_name(f)
             low = name.lower()
             if not name:
+                continue
+            if not self._is_video_file(name):  # skip .nfo/.srt/.jpg/sample sidecars
                 continue
             if ep_re is not None and not ep_re.search(low):
                 continue
