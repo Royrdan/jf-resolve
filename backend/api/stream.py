@@ -397,25 +397,25 @@ async def resolve_stream(
                         rd_probe = await validator.validate(rd_url)
                         if not rd_probe.ok:
                             log_service.info(
-                                f"RD direct: match rejected ({rd_probe.reason}) "
+                                f"{debrid_provider} direct: match rejected ({rd_probe.reason}) "
                                 f"for {state_key} — falling back to Stremio addons"
                             )
                             rd_url = None
 
                     if rd_url:
                         log_service.stream(
-                            f"RD direct: {state_key} quality={rd_target_quality} "
+                            f"{debrid_provider} direct: {state_key} quality={rd_target_quality} "
                             f"→ {rd_url[:100]}..."
                         )
                         RESOLVE_CACHE[cache_key] = (time.time(), rd_url)
                         return RedirectResponse(url=rd_url, status_code=302)
                     else:
                         log_service.info(
-                            f"RD direct: no match for {state_key}, falling back to Stremio addons"
+                            f"{debrid_provider} direct: no match for {state_key}, falling back to Stremio addons"
                         )
                 else:
                     log_service.info(
-                        f"RD direct: could not determine title for {media_type}/{tmdb_id}, skipping"
+                        f"{debrid_provider} direct: could not determine title for {media_type}/{tmdb_id}, skipping"
                     )
             except Exception as e:
                 log_service.error(f"RD direct lookup failed for {state_key}: {e}")
@@ -688,7 +688,7 @@ async def resolve_stream(
                             )
                             if direct:
                                 log_service.stream(
-                                    f"RD-converted infohash {infohash[:8]} for "
+                                    f"{debrid_provider}-converted infohash {infohash[:8]} for "
                                     f"{state_key} → {direct[:80]}..."
                                 )
                                 play_url = direct
