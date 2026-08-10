@@ -23,6 +23,7 @@ from ..services.rd_service import (
     RD_BLOCKED_RELEASE_TAGS,
     rd_filename_blocked,
 )
+from ..services.torbox_service import TorBoxService
 from ..services.settings_manager import SettingsManager
 from ..services.stream_validator import (
     DEFAULT_AUDIO_DENYLIST,
@@ -300,8 +301,25 @@ async def resolve_stream(
                     f"Failed to fetch TMDB metadata for {media_type}/{tmdb_id}: {e}"
                 )
 
-        # --- RD Direct Library Lookup ---
-        rd_api_key_val = await settings.get("rd_api_key")
+        # --- Debrid provider selection (TorBox primary, RD fallback) ---
+        # One setting swaps the whole direct-resolve path between providers.
+        # TorBoxService is API-compatible with RDService (same 3 methods), so
+        # everything downstream is provider-agnostic. `debrid_service_cls` is the
+        # class used at every instantiation site; `debrid_api_key_val` keeps the
+        # historical var name the enable-gates below read.
+        debrid_provider = (
+            await settings.get("debrid_provider", "torbox") or "torbox"
+        ).lower()
+        if debrid_provider == "rd":
+            debrid_service_cls = RDService
+            debrid_api_key_val = await settings.get("rd_api_key")
+        else:
+            debrid_provider = "torbox"
+            debrid_service_cls = TorBoxService
+            debrid_api_key_val = await settings.get("torbox_api_key")
+
+        # --- Direct Library Lookup ---
+        rd_api_key_val = debrid_api_key_val
         rd_direct_enabled = await settings.get("rd_direct_enabled", False)
 
         # When on (default), cam/telesync/DCP-rip/screener sources are never
@@ -355,7 +373,7 @@ async def resolve_stream(
 
             try:
                 if media_title:
-                    rd = RDService(rd_api_key_val)
+                    rd = debrid_service_cls(rd_api_key_val)
                     rd_url = None
 
                     if media_type == "tv":
@@ -509,7 +527,7 @@ async def resolve_stream(
         rd_resolve_enabled = await settings.get("rd_resolve_torrentio_enabled", True)
         rd_converter = None
         if rd_api_key_val and rd_resolve_enabled:
-            rd_converter = RDService(rd_api_key_val)
+            rd_converter = debrid_service_cls(rd_api_key_val)
 
         # Safety budget for torrent-mode plays: how many candidates we'll actually
         # push through Real-Debrid (each add-magnet costs several RD calls). The
@@ -517,8 +535,12 @@ async def resolve_stream(
         # only this many will ever touch RD — the real cap on RD volume per play.
         # R_BLOCKED tags are skipped BEFORE they count against this budget.
         rd_max_probes = await settings.get("rd_max_probes", 4)
-        rd_blocked_tags = await settings.get(
-            "rd_blocked_release_tags", RD_BLOCKED_RELEASE_TAGS
+        # RD's May-2026 filename filter-gate is RD-only; TorBox has no such
+        # filter, so it must NOT pre-skip those releases (it serves them fine).
+        rd_blocked_tags = (
+            await settings.get("rd_blocked_release_tags", RD_BLOCKED_RELEASE_TAGS)
+            if debrid_provider == "rd"
+            else []
         )
         rd_probes_used = 0
 
