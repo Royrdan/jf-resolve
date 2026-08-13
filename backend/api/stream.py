@@ -116,6 +116,30 @@ _QUALITY_RANK = {
     "1080p": 4, "1440p": 5, "4k": 6,
 }
 
+# Torrentio encodes live seeders as "👤 N" in the stream title. Zilean rows
+# carry no seeder count at all — those come back as None (unknown), which the
+# uncached-load gate treats as "allow" (TorBox's own no-seeds stall-detection
+# kills a truly dead magnet fast), while an explicit 0 is dropped.
+_SEEDER_RE = re.compile(r'👤\s*(\d+)')
+
+
+def _stream_seeders(stream: dict):
+    """Best-effort seeder count for a candidate source dict, or None if unknown."""
+    if not stream:
+        return None
+    bh = stream.get("behaviorHints") or {}
+    for src in (stream, bh):
+        for key in ("seeders", "seeds"):
+            v = src.get(key)
+            if isinstance(v, bool):
+                continue
+            if isinstance(v, int):
+                return v
+            if isinstance(v, str) and v.isdigit():
+                return int(v)
+    m = _SEEDER_RE.search(f"{stream.get('title', '')} {stream.get('name', '')}")
+    return int(m.group(1)) if m else None
+
 
 def _synth_torrent_ref(infohash: str, file_idx, name: str) -> str:
     """Synthetic candidate ref for TORRENT-MODE scraper results.
@@ -608,6 +632,10 @@ async def resolve_stream(
             episode=episode,
         )
 
+        # Map each candidate URL back to its source dict so the uncached-load
+        # pass (below) can read the seeder count / quality for a given ref.
+        url_to_stream = {s["url"]: s for s in streams if s.get("url")}
+
         if not candidates:
             log_service.error(
                 f"Stream selection failed for {state_key}. Quality requested: {target_quality}, "
@@ -927,8 +955,99 @@ async def resolve_stream(
         if final_url is None and held_no_sub_url is not None:
             final_url = held_no_sub_url
 
+        # ── Pass 2: uncached load-and-wait (opt-in) ────────────────────────
+        # Pass 1 walked every candidate cached-only and found nothing playable.
+        # Before falling back to a 404 / not-cached stub, optionally queue the
+        # best UNCACHED candidate onto TorBox, wait a bounded window for it to
+        # download, and serve it on the fly. Any title with a cached source is
+        # served in Pass 1 and never reaches here, so the hot path is untouched.
+        uncached_attempted = False
+        allow_uncached = await settings.get("allow_uncached_load", False)
+        if (
+            final_url is None
+            and allow_uncached
+            and debrid_provider == "torbox"
+            and rd_converter is not None
+        ):
+            min_seeders = await settings.get("uncached_min_seeders", 1)
+            wait_budget = await settings.get("uncached_load_wait_seconds", 20)
+
+            # Rank the uncached candidates by (quality, seeders). Explicit
+            # 0-seed torrents can never finish downloading, so drop them;
+            # unknown-seeder rows (Zilean) are allowed — TorBox's stall
+            # detection abandons a genuinely dead magnet quickly.
+            ranked = []
+            seen_hashes = set()
+            for cand_url in candidates:
+                ih, _fidx, cname, _tm = _parse_stream_ref(cand_url)
+                if not ih or ih in seen_hashes:
+                    continue
+                seen_hashes.add(ih)
+                src = url_to_stream.get(cand_url, {})
+                seeders = _stream_seeders(src)
+                if seeders is not None and seeders < min_seeders:
+                    continue
+                rank = _QUALITY_RANK.get(stremio.detect_quality(src), 1)
+                ranked.append((rank, seeders or 0, ih, cname))
+            ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+            if not ranked:
+                log_service.info(
+                    f"Uncached-load: no candidate with ≥{min_seeders} seeder(s) "
+                    f"for {state_key} — nothing to queue."
+                )
+            else:
+                uncached_attempted = True
+                # Try the best few, but keep the TOTAL wait bounded (shared
+                # deadline) so Jellyfin's play request doesn't time out when the
+                # first magnet is slow.
+                load_deadline = time.monotonic() + wait_budget
+                for rank, seeders, ih, cname in ranked[:3]:
+                    remaining = load_deadline - time.monotonic()
+                    if remaining < 3:
+                        break
+                    log_service.info(
+                        f"Uncached-load: queuing {ih[:8]} "
+                        f"({(cname or '')[:50]}, 👤{seeders or '?'}) onto TorBox, "
+                        f"waiting ≤{remaining:.0f}s for {state_key}."
+                    )
+                    loaded = await rd_converter.load_and_wait(
+                        ih, season, episode,
+                        filename_hint=cname,
+                        wait_budget=remaining,
+                    )
+                    if not loaded:
+                        continue
+                    if validator is not None:
+                        probe = await validator.validate(loaded)
+                        if not probe.ok:
+                            log_service.warning(
+                                f"Uncached-load: {ih[:8]} loaded but failed "
+                                f"validation ({probe.reason}) for {state_key}."
+                            )
+                            continue
+                    log_service.stream(
+                        f"Uncached-load: served freshly-loaded {ih[:8]} for "
+                        f"{state_key} → {loaded[:80]}..."
+                    )
+                    final_url = loaded
+                    break
+
         if final_url:
             RESOLVE_CACHE[cache_key] = (time.time(), final_url)
+        elif uncached_attempted:
+            # We queued an uncached download but it wasn't ready inside the wait
+            # window (it keeps downloading server-side). Serving the not-cached
+            # addon stub here would just play a ~30s "downloading" clip, so
+            # return unavailable — the next play press should hit cache.
+            log_service.warning(
+                f"Uncached-load in progress for {state_key} — not ready yet. "
+                f"Returning 404 (retry shortly to play from cache)."
+            )
+            raise HTTPException(
+                status_code=404,
+                detail="Source is caching now — try again in a moment",
+            )
         elif saw_unacceptable:
             # Every remaining candidate was a cam-tier or foreign-dub source.
             # Refuse rather than serve one — Jellyfin shows "unavailable".
