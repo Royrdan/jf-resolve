@@ -316,6 +316,108 @@ class TorBoxService:
         return url
 
     # ------------------------------------------------------------------
+    # Public: queue an UNCACHED hash and wait for it to download
+    # ------------------------------------------------------------------
+    async def torrent_status(self, torrent_id: int) -> Optional[Dict]:
+        """Return the full mylist record (download_state/progress/files) for one
+        torrent, or None if it isn't listed yet."""
+        resp = await self._request(
+            "GET",
+            "/torrents/mylist",
+            params={"id": torrent_id, "bypass_cache": "true"},
+        )
+        data = self._envelope(resp)
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list) and data:
+            return data[0]
+        return None
+
+    @staticmethod
+    def _download_ready(rec: Optional[Dict]) -> Optional[bool]:
+        """Tri-state readiness for a torrent record:
+        True  → downloaded/cached, safe to request a link
+        False → dead (error/stalled/no seeds), abandon now
+        None  → still in progress, keep polling."""
+        if not rec:
+            return None
+        state = str(rec.get("download_state", "") or "").lower()
+        progress = rec.get("progress") or 0
+        finished = rec.get("download_finished") or rec.get("cached")
+        if finished or (isinstance(progress, (int, float)) and progress >= 1) \
+                or any(s in state for s in ("completed", "uploading", "cached")):
+            return True
+        if any(s in state for s in ("error", "stalled", "missing", "dead", "no seed")):
+            return False
+        return None
+
+    async def load_and_wait(
+        self,
+        infohash: str,
+        season: Optional[int] = None,
+        episode: Optional[int] = None,
+        filename_hint: Optional[str] = None,
+        wait_budget: float = 20.0,
+        poll_interval: float = 2.0,
+    ) -> Optional[str]:
+        """Queue an UNCACHED infohash onto the account and poll until it has
+        finished downloading (or ``wait_budget`` seconds elapse), then return a
+        direct URL for the wanted file.
+
+        Unlike :meth:`resolve_infohash` (cached-only), this DELIBERATELY adds a
+        download. If it doesn't finish inside the budget we return None but leave
+        it downloading server-side, so a later retry serves it from cache. Dead
+        magnets (no seeds / error) are abandoned as soon as TorBox reports it, so
+        a 0-seed hash doesn't burn the whole budget.
+        """
+        infohash = infohash.lower()
+        torrent_id = await self.create_torrent(infohash)
+        if torrent_id is None:
+            log_service.info(
+                f"TorBox: createtorrent failed for {infohash[:8]} (load)."
+            )
+            return None
+
+        deadline = time.monotonic() + max(0.0, wait_budget)
+        rec = None
+        while True:
+            rec = await self.torrent_status(torrent_id)
+            ready = self._download_ready(rec)
+            if ready is True:
+                break
+            if ready is False:
+                log_service.warning(
+                    f"TorBox: {infohash[:8]} download not viable "
+                    f"(state={(rec or {}).get('download_state')!r}) — abandoning."
+                )
+                return None
+            if time.monotonic() >= deadline:
+                pct = int((((rec or {}).get('progress') or 0)) * 100)
+                log_service.info(
+                    f"TorBox: {infohash[:8]} still downloading ({pct}%) after "
+                    f"{wait_budget:.0f}s — leaving it to finish in background."
+                )
+                return None
+            await asyncio.sleep(poll_interval)
+
+        files = await self.list_files(torrent_id) or (rec or {}).get("files", [])
+        file_id = self._pick_file_id(files, season, episode, filename_hint)
+        if file_id is None:
+            log_service.info(
+                f"TorBox: {infohash[:8]} downloaded but no file match "
+                f"(S{season}E{episode}) — skipping."
+            )
+            return None
+
+        url = await self.request_dl(torrent_id, file_id)
+        if url:
+            log_service.info(
+                f"TorBox: loaded uncached {infohash[:8]} file {file_id} "
+                f"→ {url[:80]}..."
+            )
+        return url
+
+    # ------------------------------------------------------------------
     # Public: search the user's TorBox library for an episode/movie
     # ------------------------------------------------------------------
     def _score_files(
