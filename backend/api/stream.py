@@ -34,6 +34,7 @@ from ..services.stream_validator import (
 )
 from ..services.stremio_service import StremioService, CAM_PATTERN
 from ..services.tmdb_service import TMDBService
+from ..services.zilean_service import ZileanService
 
 router = APIRouter(prefix="/api/stream", tags=["stream"])
 
@@ -193,6 +194,12 @@ async def resolve_stream(
     tmdb = None
     api_key = await settings.get("tmdb_api_key")
 
+    # Zilean is the primary self-hosted catalogue source (replaces public
+    # Torrentio, which 429-blocks us). Read here so the manifest-required check
+    # below can stand down when Zilean is providing the candidates.
+    zilean_enabled = await settings.get("zilean_enabled", False)
+    zilean_url = await settings.get("zilean_url", "")
+
     # Get manifest URLs (support both list and single legacy format)
     manifest_urls = await settings.get("stremio_manifest_urls")
     if not manifest_urls:
@@ -201,14 +208,19 @@ async def resolve_stream(
         if single_url:
             manifest_urls = [single_url]
 
-    if not manifest_urls:
-        raise HTTPException(
-            status_code=500, detail="No Stremio manifest URLs configured"
-        )
-
     # Ensure it's a list
     if isinstance(manifest_urls, str):
         manifest_urls = [manifest_urls]
+    if not manifest_urls:
+        manifest_urls = []
+
+    # Stremio manifests are only mandatory when Zilean is NOT the source. With
+    # Zilean enabled, running with zero Stremio addons is a valid (and intended)
+    # configuration — Zilean is primary, Stremio is just an optional fallback.
+    if not manifest_urls and not (zilean_enabled and zilean_url):
+        raise HTTPException(
+            status_code=500, detail="No Stremio manifest URLs configured"
+        )
 
     failover = FailoverManager(db)
 
@@ -420,15 +432,54 @@ async def resolve_stream(
             except Exception as e:
                 log_service.error(f"RD direct lookup failed for {state_key}: {e}")
 
-        # Try each manifest URL until we get streams
         streams = []
         stremio = None
-        
-        for manifest_url in manifest_urls:
+        # Keep a concrete manifest_url for the StremioService re-init below
+        # (ordered_candidates/detect_quality are network-free utility methods);
+        # defaults to "" when running Zilean-only with no addons configured.
+        manifest_url = manifest_urls[0] if manifest_urls else ""
+
+        # --- Primary source: Zilean (self-hosted DMM catalogue) ---
+        # Query by canonical TMDB title (Zilean has no imdb_id when import
+        # matching is off). Results are infohash-only and get resolved through
+        # the same cached-only TorBox path as any torrent-mode candidate.
+        if zilean_enabled and zilean_url:
+            try:
+                zilean = ZileanService(zilean_url)
+                if media_title:
+                    if media_type == "movie":
+                        streams = await zilean.get_movie_streams(media_title, media_year)
+                    else:
+                        streams = await zilean.get_episode_streams(
+                            media_title, season, episode
+                        )
+                    if streams:
+                        log_service.info(
+                            f"Zilean: {len(streams)} candidate(s) for {state_key} "
+                            f"('{media_title}')"
+                        )
+                    else:
+                        log_service.info(
+                            f"Zilean: no candidates for {state_key} — "
+                            f"falling back to Stremio addons"
+                        )
+                else:
+                    log_service.info(
+                        f"Zilean: no title for {media_type}/{tmdb_id}, skipping"
+                    )
+            except Exception as e:
+                log_service.error(
+                    f"Zilean query failed for {state_key}: {e} — "
+                    f"falling back to Stremio addons"
+                )
+
+        # --- Fallback source: Stremio addons (only when Zilean gave nothing) ---
+        # Try each manifest URL until we get streams
+        for manifest_url in (manifest_urls if not streams else []):
             try:
                 log_service.info(f"Attempting to fetch streams from: {manifest_url}")
                 stremio = StremioService(manifest_url)
-                
+
                 if media_type == "movie":
                     current_streams = await stremio.get_movie_streams(imdb_id)
                 else:
@@ -440,7 +491,7 @@ async def resolve_stream(
                     break
                 else:
                     log_service.warning(f"No streams found from {manifest_url}, trying next..." if len(manifest_urls) > 1 else f"No streams found from {manifest_url}")
-            
+
             except Exception as e:
                 log_service.error(f"Error fetching from {manifest_url}: {e}")
                 continue
