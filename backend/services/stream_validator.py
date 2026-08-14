@@ -68,6 +68,10 @@ class ProbeResult:
     audio_codec: Optional[str] = None
     audio_langs: List[str] = field(default_factory=list)
     sub_langs: List[str] = field(default_factory=list)
+    # Dolby Vision profile of the video stream (None if not DV). 5 = single-layer
+    # DV with no HDR10 fallback (the green/purple culprit on non-DV players).
+    dv_profile: Optional[int] = None
+    dv_bl_compat: Optional[int] = None
 
 
 @dataclass
@@ -85,6 +89,12 @@ class ValidationPolicy:
     # English/original-audio source. Untagged/neutral audio always passes.
     preferred_audio_langs: List[str] = field(default_factory=lambda: ["eng"])
     require_preferred_audio: bool = False
+    # Reject Dolby Vision sources that have NO backward-compatible base layer
+    # (Profile 5, or any DV stream whose bl_signal_compatibility_id is 0). These
+    # play as green/purple on any client that can't decode DV; a DV Profile 8/7
+    # source (HDR10/SDR/HLG compatible) or a plain HDR10/SDR one is preferred
+    # instead. Turn OFF only if every playback client is DV-capable.
+    block_dv_no_fallback: bool = True
 
 
 class StreamValidator:
@@ -112,7 +122,12 @@ class StreamValidator:
             "-timeout", str(timeout * 1_000_000),
             "-user_agent", "Mozilla/5.0 (jf-resolve)",
             "-show_entries",
-            "format=format_name,duration:stream=codec_name,codec_type:stream_tags=language,title",
+            "format=format_name,duration:stream=codec_name,codec_type:"
+            "stream_tags=language,title:"
+            # Dolby Vision config record (attached to the video stream when
+            # present) — used to reject Profile 5 / no-HDR10-fallback sources
+            # that render green+purple on non-DV players.
+            "stream_side_data=dv_profile,dv_bl_signal_compatibility_id",
             "-of", "json",
             url,
         ]
@@ -186,6 +201,15 @@ class StreamValidator:
         video_codec = (video or {}).get("codec_name")
         audio_codec = (audio or {}).get("codec_name")
 
+        # Dolby Vision config (if any) lives in the video stream's side_data_list.
+        dv_profile = None
+        dv_bl_compat = None
+        for sd in (video or {}).get("side_data_list", []) or []:
+            if "dv_profile" in sd:
+                dv_profile = sd.get("dv_profile")
+                dv_bl_compat = sd.get("dv_bl_signal_compatibility_id")
+                break
+
         duration = None
         try:
             if fmt.get("duration") is not None:
@@ -201,6 +225,8 @@ class StreamValidator:
             audio_codec=audio_codec,
             audio_langs=audio_langs,
             sub_langs=sub_langs,
+            dv_profile=dv_profile,
+            dv_bl_compat=dv_bl_compat,
         )
 
         # Liveness: must actually contain a video stream.
@@ -208,6 +234,20 @@ class StreamValidator:
             result.ok = False
             result.reason = "no_video_stream"
             return result
+
+        # Dolby Vision gate: reject a DV source with no backward-compatible base
+        # layer (Profile 5, or bl_signal_compatibility_id == 0). Without DV RPU
+        # processing these decode in the wrong colour space → green/purple on
+        # non-DV players. DV Profile 8/7 (compat 1/2/4) and plain HDR10/SDR pass,
+        # so the resolver falls through to a source that displays correctly.
+        if self.policy.block_dv_no_fallback and dv_profile is not None:
+            if dv_profile == 5 or dv_bl_compat == 0:
+                result.ok = False
+                result.reason = (
+                    f"dolby_vision_no_fallback (profile={dv_profile}, "
+                    f"bl_compat={dv_bl_compat})"
+                )
+                return result
 
         # Duration gate: reject samples/featurettes/broken short files.
         min_dur = self.policy.min_duration_seconds

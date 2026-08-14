@@ -393,6 +393,9 @@ async def resolve_stream(
                     probe_timeout_seconds=await settings.get("stream_probe_timeout_seconds", 10),
                     preferred_audio_langs=preferred_audio_langs,
                     require_preferred_audio=prefer_english_audio,
+                    block_dv_no_fallback=await settings.get(
+                        "block_dolby_vision_no_fallback", True
+                    ),
                 )
                 validator = StreamValidator(policy)
             else:
