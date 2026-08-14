@@ -605,11 +605,22 @@ async def resolve_stream(
             rd_converter = debrid_service_cls(rd_api_key_val)
 
         # Safety budget for torrent-mode plays: how many candidates we'll actually
-        # push through Real-Debrid (each add-magnet costs several RD calls). The
-        # candidate loop can walk many streams for quality/validation reasons, but
-        # only this many will ever touch RD — the real cap on RD volume per play.
-        # R_BLOCKED tags are skipped BEFORE they count against this budget.
-        rd_max_probes = await settings.get("rd_max_probes", 4)
+        # push through the debrid provider. The candidate loop can walk many
+        # streams for quality/validation reasons, but only this many will ever be
+        # probed — the real cap on provider volume per play. R_BLOCKED tags are
+        # skipped BEFORE they count against this budget.
+        #
+        # Provider-aware: RD's cache probe is an expensive add+poll+delete dance
+        # that trips its rate breaker, so it stays tightly capped (4). TorBox's
+        # probe is a single cheap /checkcached READ (no add, our own single IP,
+        # multi-IP lenient service) — a low cap there just means a cached copy
+        # deeper in the list never gets served (the Severance S02E02 bug). So
+        # TorBox walks far deeper by default. Combined with the cached-first
+        # pre-scan below, the walk almost always serves on probe #1 anyway.
+        if debrid_provider == "torbox":
+            rd_max_probes = await settings.get("torbox_max_probes", 40)
+        else:
+            rd_max_probes = await settings.get("rd_max_probes", 4)
         # RD's May-2026 filename filter-gate is RD-only; TorBox has no such
         # filter, so it must NOT pre-skip those releases (it serves them fine).
         rd_blocked_tags = (
@@ -648,6 +659,55 @@ async def resolve_stream(
             raise HTTPException(
                 status_code=404, detail="No suitable stream quality found"
             )
+
+        # --- TorBox cached-first pre-scan -------------------------------------
+        # Batch-check EVERY candidate infohash against TorBox's cache in one
+        # cheap read, then stable-reorder so already-cached sources lead the
+        # walk. This is what makes playback reliable: a cached copy sitting
+        # deeper in the candidate list (e.g. Severance S02E02's H.265-NTb at
+        # index 4) is surfaced to the front and served on the first probe,
+        # instead of the walk dead-ending on a probe cap or on uncached hashes
+        # ahead of it. Quality order is preserved WITHIN the cached group and
+        # within the uncached group, so this only ever promotes a cached source
+        # over an equal-or-worse uncached one — never demotes quality between
+        # two cached sources. No-op for RD (no cheap batch cache-check).
+        if debrid_provider == "torbox" and rd_converter is not None and len(candidates) > 1:
+            try:
+                cand_hashes = []
+                for url in candidates:
+                    ih, _fi, _nm, is_tm = _parse_stream_ref(url)
+                    cand_hashes.append(ih.lower() if (ih and is_tm) else None)
+                to_check = [h for h in cand_hashes if h]
+                if to_check:
+                    cached_set = await rd_converter.check_cached_batch(to_check)
+                    if cached_set:
+                        cached_c = [
+                            u for u, h in zip(candidates, cand_hashes)
+                            if h and h in cached_set
+                        ]
+                        rest_c = [
+                            u for u, h in zip(candidates, cand_hashes)
+                            if not (h and h in cached_set)
+                        ]
+                        candidates = cached_c + rest_c
+                        log_service.info(
+                            f"TorBox cache pre-scan for {state_key}: "
+                            f"{len(cached_set)}/{len(to_check)} candidate(s) "
+                            f"cached — leading walk with cached sources."
+                        )
+                    else:
+                        log_service.info(
+                            f"TorBox cache pre-scan for {state_key}: "
+                            f"0/{len(to_check)} candidate(s) cached — "
+                            f"walk proceeds in quality order (uncached-load may follow)."
+                        )
+            except Exception as e:
+                # Pre-scan is a best-effort optimisation; never let it break a
+                # play. Fall through to the normal per-candidate walk.
+                log_service.warning(
+                    f"TorBox cache pre-scan failed for {state_key} "
+                    f"([{type(e).__name__}] {e}) — continuing unordered."
+                )
 
         # Bound the failover start index to the candidate list.
         if use_index >= len(candidates):

@@ -123,6 +123,47 @@ class TorBoxService:
                 return data
         return None
 
+    async def check_cached_batch(self, infohashes: List[str]) -> set:
+        """Return the SUBSET of ``infohashes`` that TorBox has cached, as a set of
+        lowercased hashes. One cheap read per chunk — ``/torrents/checkcached``
+        accepts many ``hash=`` params at once, so the whole candidate list is
+        vetted in one or two calls instead of one-at-a-time. Read-only: adds
+        nothing to the account. Used to reorder cached candidates to the front of
+        the resolve walk so a play never dead-ends on a probe cap before it
+        reaches an already-cached source."""
+        cached: set = set()
+        # De-dup, drop falsy, normalise. Chunk to keep the URL well within any
+        # gateway limit (40-hex hashes; 50/chunk ≈ 2.3 KB of query string).
+        uniq = []
+        seen = set()
+        for h in infohashes:
+            if not h:
+                continue
+            hl = h.lower()
+            if hl not in seen:
+                seen.add(hl)
+                uniq.append(hl)
+        for i in range(0, len(uniq), 50):
+            chunk = uniq[i:i + 50]
+            resp = await self._request(
+                "GET",
+                "/torrents/checkcached",
+                params=[("hash", h) for h in chunk]
+                + [("format", "object"), ("list_files", "false")],
+            )
+            data = self._envelope(resp)
+            if isinstance(data, dict):
+                for h in chunk:
+                    if data.get(h) or data.get(h.upper()):
+                        cached.add(h)
+            elif isinstance(data, list):
+                # tolerate list-format responses ([{hash: ...}, ...])
+                for entry in data:
+                    hh = str(entry.get("hash", "")).lower()
+                    if hh in seen:
+                        cached.add(hh)
+        return cached
+
     async def create_torrent(self, infohash: str) -> Optional[int]:
         """Add a magnet (by infohash) and return its TorBox ``torrent_id``. For
         an already-cached hash this is instant (no download queued)."""
