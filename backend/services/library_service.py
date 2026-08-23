@@ -147,7 +147,10 @@ class LibraryService:
         await self._create_strm_files(item, details, quality_versions)
         await self.db.commit()
         await self.db.refresh(item)
-        await self._trigger_jellyfin_scan()
+        # Targeted scan of just this item's folder (fast) instead of a full
+        # library refresh — critical now the library is a network share and
+        # Jellyfin's real-time monitor can't see remote writes.
+        await self._trigger_jellyfin_scan(specific_path=str(full_path))
 
         log_service.info(f"Added to library: {media_type}:{tmdb_id} - {title}")
 
@@ -581,7 +584,7 @@ class LibraryService:
                     # healed in the DB and won't need re-healing on next regen.
                     item.quality_versions = json.dumps(qualities)
                 await self.db.commit()
-                await self._trigger_jellyfin_scan()
+                await self._trigger_jellyfin_scan(specific_path=str(folder_path))
                 log_service.info(f"Regenerated all STRM files for TV show: {item.title}")
                 return {"new_episodes": 0, "message": "STRM files regenerated"}
 
@@ -635,7 +638,7 @@ class LibraryService:
             await self.db.commit()
 
             if new_episodes > 0:
-                await self._trigger_jellyfin_scan()
+                await self._trigger_jellyfin_scan(specific_path=str(folder_path))
                 log_service.info(f"Added {new_episodes} new episodes for {item.title}")
 
             return {
