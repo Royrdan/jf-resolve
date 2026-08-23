@@ -310,6 +310,49 @@ class StremioService:
         return any(re.search(p, text_lower) for p in patterns)
 
     @staticmethod
+    def _has_specific_episode_marker(text: str) -> bool:
+        """
+        True if `text` pins a *specific* single episode (any SxxExx / NxNN form).
+        Used to tell a season pack (no episode pinned) apart from a different
+        single episode we must not serve in place of the requested one.
+        """
+        t = text.lower()
+        return bool(
+            re.search(r'(?<![a-z0-9])s\s*\d{1,2}\s*e\s*\d{1,3}(?!\d)', t)
+            or re.search(r'(?<![a-z0-9])\d{1,2}\s*x\s*\d{1,3}(?!\d)', t)
+        )
+
+    @classmethod
+    def _season_pack_matches(cls, text: str, season: int) -> bool:
+        """
+        True if `text` looks like a pack that COVERS the requested season without
+        pinning a single episode — a whole-season pack, a multi-season range, or a
+        complete-series pack. Such packs contain the requested episode, and the
+        provider file-picker (`_pick_file_id`) extracts the right file from them.
+        A stream naming a specific *other* episode is rejected so we never serve
+        the wrong episode from a season fallback.
+        """
+        if cls._has_specific_episode_marker(text):
+            return False
+        s = int(season)
+        raw = text.lower()
+        norm = re.sub(r"[\s._\-]+", " ", raw).strip()
+        # Whole-season token: "s09", "s 9", "season 9"
+        if re.search(rf'(?<![a-z0-9])s ?0*{s}(?![0-9e])', norm):
+            return True
+        if re.search(rf'(?<![a-z0-9])season ?0*{s}(?![0-9])', norm):
+            return True
+        # Season range on the raw text (dashes intact): "s01-13", "s01-s13", "1-13"
+        for m in re.finditer(r'(?<![a-z0-9])s?0*(\d{1,2})\s*-\s*s?0*(\d{1,2})(?![0-9])', raw):
+            lo, hi = int(m.group(1)), int(m.group(2))
+            if lo <= s <= hi:
+                return True
+        # Complete-series / all-seasons indicators
+        if re.search(r'\b(complete|all seasons|full series)\b', norm):
+            return True
+        return False
+
+    @staticmethod
     def _year_conflicts(text: str, expected_year: int, tolerance: int = 1) -> bool:
         """
         True if the text contains 4-digit year tokens AND none of them match
@@ -349,7 +392,10 @@ class StremioService:
                 if len(rejected_samples) < 3:
                     rejected_samples.append(text[:120].replace("\n", " "))
                 continue
-            if is_episode and not cls._episode_marker_matches(text, season, episode):
+            if is_episode and not (
+                cls._episode_marker_matches(text, season, episode)
+                or cls._season_pack_matches(text, season)
+            ):
                 if len(rejected_samples) < 3:
                     rejected_samples.append(text[:120].replace("\n", " "))
                 continue
