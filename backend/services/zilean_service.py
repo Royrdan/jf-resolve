@@ -28,6 +28,7 @@ normalised title match, and ``stream.py`` re-filters the ``raw_title`` on
 title + SxxExx + year afterwards, so a loose server-side match is fine.
 """
 
+import re
 from typing import Dict, List, Optional
 from urllib.parse import quote
 
@@ -61,7 +62,18 @@ class ZileanService:
         if not self.base_url or not title:
             return []
 
-        params = f"Query={quote(title)}"
+        # Zilean stores RTN-parsed titles with apostrophes removed
+        # ("Alice's" -> "Alices") and its /dmm/filtered full-text match
+        # tokenises "Alice's" -> "alice", which never matches the stored
+        # "alices" -> every possessive title (Alice's Wonderland Bakery,
+        # Bob's Burgers, Grey's Anatomy...) returns zero. Mirror Zilean's
+        # own normalisation before querying: drop apostrophes with no gap,
+        # then punctuation -> space. stream.py re-filters raw_title on
+        # title + SxxExx + year afterwards, so a looser query is safe.
+        norm = re.sub(r"[’'`]", "", title)
+        norm = re.sub(r"[^\w\s]", " ", norm, flags=re.UNICODE)
+        norm = " ".join(norm.split()) or title
+        params = f"Query={quote(norm)}"
         if season is not None:
             params += f"&Season={int(season)}"
         if episode is not None:
