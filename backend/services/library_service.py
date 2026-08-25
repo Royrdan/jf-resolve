@@ -313,6 +313,40 @@ class LibraryService:
             f"Created STRM files for movie: {item.title} with qualities: {qualities}"
         )
 
+    @staticmethod
+    def _episode_released(
+        episode: Dict, released_only: bool, buffer_days: int = 0
+    ) -> bool:
+        """
+        Decide whether an episode should get STRM files.
+
+        When released_only is on, an episode is kept only if its air_date is on
+        or before (today - buffer_days); episodes dated later are skipped as
+        unreleased. The buffer (settings.release_buffer_days) lets an episode
+        wait a few days after airing so debrid caches can fill before it shows
+        up. Episodes with no air_date at all are kept: TMDB normally only lists
+        dated, aired episodes, so withholding undated ones risks hiding real
+        content. The filter therefore only removes episodes we can positively
+        confirm haven't reached the cutoff yet.
+        """
+        if not released_only:
+            return True
+        import datetime
+
+        air_date = episode.get("air_date")
+        if not air_date:
+            return True
+        try:
+            aired = datetime.date.fromisoformat(air_date)
+        except (ValueError, TypeError):
+            return True
+        try:
+            buffer = max(0, int(buffer_days or 0))
+        except (ValueError, TypeError):
+            buffer = 0
+        cutoff = datetime.date.today() - datetime.timedelta(days=buffer)
+        return aired <= cutoff
+
     async def _create_tv_strms(
         self, item: LibraryItem, details: Dict, qualities: List[str]
     ):
@@ -326,8 +360,11 @@ class LibraryService:
 
         server_url = await self._get_stream_server_url()
         streams_per_quality = await self.settings.get("streams_per_quality", 2)
+        released_only = await self.settings.get("filter_unreleased", True)
+        release_buffer_days = await self.settings.get("release_buffer_days", 0)
 
         num_seasons = details.get("number_of_seasons", 0)
+        skipped_unreleased = 0
 
         for season_num in range(1, num_seasons + 1):
             try:
@@ -348,6 +385,11 @@ class LibraryService:
             await asyncio.to_thread(season_folder.mkdir, parents=True, exist_ok=True)
 
             for episode in episodes:
+                if not self._episode_released(
+                    episode, released_only, release_buffer_days
+                ):
+                    skipped_unreleased += 1
+                    continue
                 episode_num = episode.get("episode_number", 0)
                 episode_title = episode.get("name", f"Episode {episode_num}")
                 clean_title = self._sanitize_filename(item.title)
@@ -409,6 +451,11 @@ class LibraryService:
 
         log_service.info(
             f"Created STRM files for TV show: {item.title} ({num_seasons} seasons)"
+            + (
+                f" — skipped {skipped_unreleased} unreleased episode(s)"
+                if skipped_unreleased
+                else ""
+            )
         )
 
     async def remove_from_library(self, item_id: int):
@@ -588,12 +635,26 @@ class LibraryService:
                 log_service.info(f"Regenerated all STRM files for TV show: {item.title}")
                 return {"new_episodes": 0, "message": "STRM files regenerated"}
 
-            # Normal refresh: only add new seasons/episodes
+            # Normal refresh: re-scan from the last checked season onward so we
+            # catch both brand-new seasons AND newly-aired episodes of an
+            # in-progress season. Episodes that were still unreleased when the
+            # show was first added get their STRM files created once they air.
+            # The per-file exists() check below keeps re-scans idempotent.
             new_episodes = 0
-            for season_num in range(item.last_season_checked + 1, current_seasons + 1):
-                season_details = await self.tmdb.get_season_details(
-                    item.tmdb_id, season_num
-                )
+            released_only = await self.settings.get("filter_unreleased", True)
+            release_buffer_days = await self.settings.get("release_buffer_days", 0)
+            start_season = max(1, item.last_season_checked)
+            for season_num in range(start_season, current_seasons + 1):
+                try:
+                    season_details = await self.tmdb.get_season_details(
+                        item.tmdb_id, season_num
+                    )
+                except Exception as e:
+                    # Announced season with no TMDB detail record yet (→ 404).
+                    log_service.warning(
+                        f"Skipping season {season_num} of {item.title}: {e}"
+                    )
+                    continue
                 episodes = season_details.get("episodes", [])
 
                 season_folder = folder_path / f"Season {season_num:02d}"
@@ -602,6 +663,10 @@ class LibraryService:
                 )
 
                 for episode in episodes:
+                    if not self._episode_released(
+                        episode, released_only, release_buffer_days
+                    ):
+                        continue
                     episode_num = episode.get("episode_number", 0)
                     episode_title = episode.get("name", f"Episode {episode_num}")
                     clean_title = self._sanitize_filename(item.title)
