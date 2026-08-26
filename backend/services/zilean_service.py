@@ -127,6 +127,12 @@ class ZileanService:
                     "name": f"Zilean {resolution}".strip(),
                     "fileIdx": None,
                     "behaviorHints": {"filename": raw_title},
+                    # RTN-parsed language codes (e.g. ['en','fr']). Zilean only
+                    # sets this when it detected a language tag, so an absent /
+                    # empty list means "unmarked" (English original by default).
+                    # Carried through so the candidate sorter can rank by likely
+                    # audio language WITHOUT a probe. Kept as-is (ISO-ish codes).
+                    "languages": row.get("languages") or row.get("language") or [],
                 }
             )
 

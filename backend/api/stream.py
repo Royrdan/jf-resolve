@@ -644,6 +644,7 @@ async def resolve_stream(
             fallback_order,
             season=season,
             episode=episode,
+            english_first=prefer_english_audio,
         )
 
         # Map each candidate URL back to its source dict so the uncached-load

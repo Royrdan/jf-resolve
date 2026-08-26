@@ -35,6 +35,98 @@ def _is_deprioritised_stream(stream: Dict) -> bool:
     return bool(_UPSCALE_PATTERN.search(text) or _ARCHIVE_EXT_PATTERN.search(text))
 
 
+# ── Candidate sort signals (REORDER ONLY — never discard) ───────────────────
+# These rank candidates WITHIN a single resolution bucket so the resolve walk
+# probes the likely-best source first (fewer wasted TorBox unrestrict + ffprobe
+# round-trips). The validator + denylists remain the ONLY things that drop a
+# source; a wrong guess here just changes probe order, never what gets served.
+# All tiers are plain constants — tune them here.
+
+# Audio-language likelihood from the release name (fallback when the source
+# provides no structured `languages` list). English markers are checked before
+# foreign ones so a MULTi/Dual release that also says FRENCH still ranks English.
+_ENGLISH_AUDIO_MARKER = re.compile(
+    r"\b(multi|dual[\s._-]?audio|dualaudio|vostfr|vostang|eng|english|"
+    r"en[\s._-]?subs?|subbed)\b",
+    re.IGNORECASE,
+)
+_FOREIGN_AUDIO_MARKER = re.compile(
+    r"\b(french|truefrench|vff|vfq|vfi|vof|german|deutsch|italian|ita|"
+    r"spanish|espanol|castellano|latino|dublado|dubbed|dublat|pldub|lektor|"
+    r"russian|rus|hindi|tamil|telugu|korean|polish|czech|hungarian|"
+    r"swedish|danish|greek|turkish|dubbing|dublaj|multidub|rusdub|itadub)\b",
+    re.IGNORECASE,
+)
+# Editions that look broken on ordinary players (3D side-by-side / top-bottom).
+# Not discarded — just sent to the back of their quality bucket.
+_BAD_EDITION_MARKER = re.compile(
+    r"\b(3d|h?sbs|htab|full[\s._-]?sbs|half[\s._-]?(?:sbs|ou))\b", re.IGNORECASE
+)
+# Extra credit for an explicit embedded-subtitle hint in the name (weak signal;
+# real subtitle handling stays post-probe in stream.py).
+_SUBTITLE_HINT_MARKER = re.compile(
+    r"\b(vostfr|subbed|multi[\s._-]?subs?|esubs?|msubs?)\b", re.IGNORECASE
+)
+
+# (regex, score) tiers — first/highest match wins; unmatched → the neutral
+# default noted on each helper.
+_CONTAINER_TIERS = [
+    (re.compile(r"\bmkv\b", re.IGNORECASE), 3),
+    (re.compile(r"\b(mp4|m4v)\b", re.IGNORECASE), 2),
+    (re.compile(r"\b(webm|avi)\b", re.IGNORECASE), 1),
+    (re.compile(r"\b(ts|m2ts|wmv|iso|mpg|vob)\b", re.IGNORECASE), 0),
+]
+_SOURCE_TIERS = [
+    (re.compile(r"\b(remux|bdremux|bd25|bd50)\b", re.IGNORECASE), 5),
+    (re.compile(r"\b(bluray|blu-ray|bdrip|bd)\b", re.IGNORECASE), 4),
+    (re.compile(
+        r"\b(web[\s._-]?dl|webdl|amzn|dsnp|disnp|nf|nick|pmtp|hmax|max|atvp|"
+        r"hulu|okko|playweb)\b", re.IGNORECASE), 3),
+    (re.compile(r"\b(webrip|web)\b", re.IGNORECASE), 2),
+    (re.compile(r"\b(brrip|hdrip)\b", re.IGNORECASE), 1),
+    (re.compile(r"\b(hdtv|pdtv|dsr|dvdrip|dvd)\b", re.IGNORECASE), 1),
+]
+_CODEC_TIERS = [
+    (re.compile(r"\b(x265|h\.?265|hevc)\b", re.IGNORECASE), 3),
+    (re.compile(r"\b(x264|h\.?264|avc)\b", re.IGNORECASE), 3),
+    (re.compile(r"\b(mpeg-?2|vc-?1)\b", re.IGNORECASE), 1),
+    (re.compile(r"\b(xvid|divx)\b", re.IGNORECASE), 0),
+]
+_AUDIO_TIERS = [
+    (re.compile(r"\b(atmos|truehd|dts[\s._-]?hd|dts[\s._-]?x)\b", re.IGNORECASE), 4),
+    (re.compile(r"\bdts\b", re.IGNORECASE), 3),
+    (re.compile(r"\b(ddp|dd\+|eac3|e-ac-3)\b", re.IGNORECASE), 3),
+    (re.compile(r"\b(dd|ac3|ac-3)\b", re.IGNORECASE), 2),
+    (re.compile(r"\baac\b", re.IGNORECASE), 1),
+    (re.compile(r"\b(mp3|opus|vorbis)\b", re.IGNORECASE), 0),
+]
+
+
+def _tier_score(text: str, tiers, default: int) -> int:
+    """Highest-scoring tier whose pattern appears in text, else default."""
+    best = None
+    for pat, score in tiers:
+        if pat.search(text) and (best is None or score > best):
+            best = score
+    return default if best is None else best
+
+
+def _language_rank(stream: Dict) -> int:
+    """2 = English audio present, 1 = unmarked (English original by default),
+    0 = foreign-dub only. Trusts the source's structured `languages` list first
+    (Zilean), then falls back to reading the release name."""
+    langs = stream.get("languages") or []
+    if langs:
+        norm = {str(l).strip().lower()[:2] for l in langs}
+        return 2 if "en" in norm else 0
+    text = f"{stream.get('title', '')} {stream.get('name', '')}"
+    if _ENGLISH_AUDIO_MARKER.search(text):
+        return 2
+    if _FOREIGN_AUDIO_MARKER.search(text):
+        return 0
+    return 1
+
+
 class StremioService:
     """Stremio addon manifest integration"""
 
@@ -495,6 +587,49 @@ class StremioService:
             )
         return episode_specific + season_packs
 
+    def _candidate_rank_key(
+        self,
+        stream: Dict,
+        season: Optional[int],
+        episode: Optional[int],
+        english_first: bool,
+    ) -> tuple:
+        """Composite within-bucket sort key (higher tuple = probed first).
+
+        Precedence, most significant first:
+          1. English audio likely       (only when english_first)
+          2. Episode-specific > pack     (TV correctness)
+          3. Not a 3D/SBS edition        (broken-looking on normal players)
+          4. Container   mkv>mp4>...     (best embedded subs / multi-audio)
+          5. Source tier remux>web-dl>.. (better encode at same resolution)
+          6. Codec       h265/h264>xvid
+          7. Audio       atmos>ddp>ac3>aac
+          8. Subtitle hint in the name   (weak; real subs handled post-probe)
+
+        REORDER ONLY — nothing here drops a candidate.
+        """
+        text = f"{stream.get('title', '')} {stream.get('name', '')}"
+        low = text.lower()
+        lang = _language_rank(stream) if english_first else 1
+        ep_specific = (
+            1
+            if season is not None
+            and episode is not None
+            and re.search(rf"s{season:02d}e{episode:02d}", low)
+            else 0
+        )
+        edition_ok = 0 if _BAD_EDITION_MARKER.search(text) else 1
+        return (
+            lang,
+            ep_specific,
+            edition_ok,
+            _tier_score(text, _CONTAINER_TIERS, 2),
+            _tier_score(text, _SOURCE_TIERS, 2),
+            _tier_score(text, _CODEC_TIERS, 2),
+            _tier_score(text, _AUDIO_TIERS, 2),
+            1 if _SUBTITLE_HINT_MARKER.search(text) else 0,
+        )
+
     def ordered_candidates(
         self,
         streams: List[Dict],
@@ -503,6 +638,7 @@ class StremioService:
         fallback_order: List[str] = None,
         season: Optional[int] = None,
         episode: Optional[int] = None,
+        english_first: bool = True,
     ) -> List[str]:
         """
         Build a single flat, de-duplicated list of candidate stream URLs in
@@ -539,12 +675,23 @@ class StremioService:
         primary = [s for s in streams if not _is_deprioritised_stream(s)]
         deprioritised = [s for s in streams if _is_deprioritised_stream(s)]
 
+        # Stable composite sort within each resolution bucket: English-audio
+        # first, then episode-specificity, then file-quality tiers (container /
+        # source / codec / audio) and edition sanity. Python's sort is stable,
+        # so equal-key candidates keep the indexer's original order.
+        def _bucket_sorted(items: List[Dict]) -> List[Dict]:
+            return sorted(
+                items,
+                key=lambda s: self._candidate_rank_key(
+                    s, season, episode, english_first
+                ),
+                reverse=True,
+            )
+
         for q in ordered_qualities:
-            q_streams = [s for s in primary if self.detect_quality(s) == q]
-            if season is not None and episode is not None and q_streams:
-                q_streams = self._sort_by_episode_specificity(
-                    q_streams, season, episode
-                )
+            q_streams = _bucket_sorted(
+                [s for s in primary if self.detect_quality(s) == q]
+            )
             for s in q_streams:
                 url = s.get("url")
                 if url and url not in seen:
@@ -553,9 +700,10 @@ class StremioService:
 
         # Catch-all: include any streams whose detected quality wasn't in the
         # ordered list (only when fallback is enabled — better a wrong-quality
-        # playable stream than nothing). Genuine first, then de-prioritised last.
+        # playable stream than nothing). Genuine (rank-sorted) first, then
+        # de-prioritised upscales/archives last.
         if fallback_enabled:
-            for s in primary + deprioritised:
+            for s in _bucket_sorted(primary) + deprioritised:
                 url = s.get("url")
                 if url and url not in seen:
                     seen.add(url)
