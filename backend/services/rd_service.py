@@ -257,8 +257,13 @@ class RDService:
 
     @staticmethod
     def _normalise(text: str) -> str:
-        """Lowercase and replace common separators with a single space."""
-        return re.sub(r"[\s._\-]+", " ", text.lower()).strip()
+        """Lowercase, drop apostrophes, and collapse separators to a space.
+
+        Apostrophes are stripped so "Gabby's" matches sources that store the
+        title as "Gabbys" or "Gabby s" (some trackers/debrid replace ' with a
+        space or nothing)."""
+        text = re.sub(r"['’]", "", text.lower())
+        return re.sub(r"[\s._\-]+", " ", text).strip()
 
     @classmethod
     def _quality_rank(cls, filename: str) -> float:
@@ -581,17 +586,22 @@ class RDService:
     def _title_matches(self, torrent_name: str, title_words: List[str]) -> bool:
         """Return True if all significant words from the title appear in the torrent name."""
         norm = self._normalise(torrent_name)
-        return all(w in norm for w in title_words)
+        compact = norm.replace(" ", "")
+        return all(w in norm or w.replace(" ", "") in compact for w in title_words)
 
     def _season_in_name(self, torrent_name: str, season: int) -> bool:
         """True if the torrent name references the requested season — including
-        multi-season range packs (S01-13, Seasons 1-13) and complete-series packs."""
+        multi-season range packs (S01-13, S01 13, Seasons 1-13) and
+        complete-series packs."""
         name = torrent_name.lower()
         if "complete" in name:
             return True
-        # Season ranges: S01-13, S01-S13, Season(s) 1-13, 1 to 13
+        # Season ranges: S01-13, S01-S13, S01 13 (dash lost to a space by some
+        # debrid providers), Season(s) 1-13, 1 to 13. The trailing (?![\dpi])
+        # guard stops "S01 1080p" being read as a 01-10 range.
         for m in re.finditer(
-            r"s(?:eason)?s?\s*0*(\d{1,2})\s*(?:-|–|to)+\s*s?(?:eason)?\s*0*(\d{1,2})",
+            r"s(?:eason)?s?\s*0*(\d{1,2})(?:\s*(?:-|–|to)\s*|\s+)"
+            r"s?(?:eason)?\s*0*(\d{1,2})(?![\dpi])",
             name,
         ):
             if int(m.group(1)) <= season <= int(m.group(2)):

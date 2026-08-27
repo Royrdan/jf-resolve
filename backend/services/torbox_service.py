@@ -290,15 +290,19 @@ class TorBoxService:
     @staticmethod
     def _title_matches(name: str, title_words: List[str]) -> bool:
         norm = RDService._normalise(name)
-        return all(w in norm for w in title_words)
+        compact = norm.replace(" ", "")
+        return all(w in norm or w.replace(" ", "") in compact for w in title_words)
 
     @staticmethod
     def _season_in_name(name: str, season: int) -> bool:
         low = name.lower()
         if "complete" in low:
             return True
+        # Accept "S01 13" (dash lost to a space) as well as S01-13 / S01-S13.
+        # (?![\dpi]) stops "S01 1080p" being read as a 01-10 range.
         for m in re.finditer(
-            r"s(?:eason)?s?\s*0*(\d{1,2})\s*(?:-|–|to)+\s*s?(?:eason)?\s*0*(\d{1,2})",
+            r"s(?:eason)?s?\s*0*(\d{1,2})(?:\s*(?:-|–|to)\s*|\s+)"
+            r"s?(?:eason)?\s*0*(\d{1,2})(?![\dpi])",
             low,
         ):
             if int(m.group(1)) <= season <= int(m.group(2)):
