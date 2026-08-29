@@ -175,6 +175,81 @@ def _parse_stream_ref(url: str):
     return infohash, None, name, False
 
 
+@router.get("/providers")
+async def provider_health(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Lightweight provider health for player error screens. Pings the ACTIVE debrid
+    provider (TorBox or Real-Debrid) and the Zilean indexer with short timeouts so it
+    returns fast even when a provider is hanging. Player clients call this on a resolve
+    failure/timeout to show WHY (e.g. "TorBox down (403)") instead of a bare "timeout".
+    Auth: internal-IP whitelist (same as /resolve), so LAN players can call it tokenless.
+    """
+    settings = SettingsManager(db)
+    await settings.load_cache()
+
+    out = {
+        "provider": None,
+        "debrid": {"status": "unknown", "message": ""},
+        "zilean": {"status": "unknown", "message": ""},
+        "overall": "ok",
+    }
+
+    debrid_provider = await settings.get("debrid_provider", "torbox") or "torbox"
+    out["provider"] = debrid_provider
+
+    # Active debrid provider (the usual point of failure).
+    try:
+        if debrid_provider == "rd":
+            token = await settings.get("rd_api_key")
+            url = "https://api.real-debrid.com/rest/1.0/user"
+        else:
+            token = await settings.get("torbox_api_key")
+            url = "https://api.torbox.app/v1/api/torrents/mylist?limit=1"
+        if not token:
+            out["debrid"] = {"status": "not_configured", "message": "No API key set"}
+            out["overall"] = "degraded"
+        else:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(
+                    url, headers={"Authorization": f"Bearer {token}"}, timeout=8.0
+                )
+            if r.status_code == 200:
+                out["debrid"] = {"status": "ok", "message": "Connected"}
+            else:
+                out["debrid"] = {"status": "error", "message": f"HTTP {r.status_code}"}
+                out["overall"] = "degraded"
+    except Exception as e:
+        out["debrid"] = {"status": "error", "message": type(e).__name__}
+        out["overall"] = "degraded"
+
+    # Zilean indexer (best-effort; a candidate source, not fatal on its own).
+    try:
+        zilean_url = await settings.get("zilean_url", "")
+        if not zilean_url:
+            out["zilean"] = {"status": "not_configured", "message": "URL not set"}
+        else:
+            base = zilean_url.strip().rstrip("/")
+            if base and not base.startswith(("http://", "https://")):
+                base = f"http://{base}"
+            async with httpx.AsyncClient() as client:
+                r = await client.get(f"{base}/healthchecks/ping", timeout=4.0)
+            if r.status_code == 200:
+                out["zilean"] = {"status": "ok", "message": "Connected"}
+            else:
+                out["zilean"] = {"status": "error", "message": f"HTTP {r.status_code}"}
+                if out["overall"] == "ok":
+                    out["overall"] = "degraded"
+    except Exception as e:
+        out["zilean"] = {"status": "error", "message": type(e).__name__}
+        if out["overall"] == "ok":
+            out["overall"] = "degraded"
+
+    return out
+
+
 @router.api_route("/resolve/{media_type}/{tmdb_id}", methods=["GET", "HEAD"])
 async def resolve_stream(
     media_type: str,
