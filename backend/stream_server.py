@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import stream
+from .api import segments, stream
 from .config import settings
 
 
@@ -48,6 +48,7 @@ stream_app.add_middleware(
 
 # Include only the streaming router
 stream_app.include_router(stream.router)
+stream_app.include_router(segments.router)
 
 
 @stream_app.get("/")
