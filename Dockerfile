@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     python3-dev \
     ffmpeg \
+    libchromaprint-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # Install python dependencies
