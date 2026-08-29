@@ -960,6 +960,7 @@ async def resolve_stream(
                             f"Validation passed for {state_key}: "
                             f"fmt={probe.format_name} v={probe.video_codec} "
                             f"a={probe.audio_codec} langs={probe.audio_langs} "
+                            f"default_audio={probe.default_audio_lang} "
                             f"subs={probe.sub_langs} dur={probe.duration}"
                         )
 

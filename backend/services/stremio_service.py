@@ -44,10 +44,17 @@ def _is_deprioritised_stream(stream: Dict) -> bool:
 
 # Audio-language likelihood from the release name (fallback when the source
 # provides no structured `languages` list). English markers are checked before
-# foreign ones so a MULTi/Dual release that also says FRENCH still ranks English.
+# foreign ones so a subbed/original release that also says FRENCH still ranks English.
 _ENGLISH_AUDIO_MARKER = re.compile(
-    r"\b(multi|dual[\s._-]?audio|dualaudio|vostfr|vostang|eng|english|"
-    r"en[\s._-]?subs?|subbed)\b",
+    r"\b(vostfr|vostang|eng|english|en[\s._-]?subs?|subbed)\b",
+    re.IGNORECASE,
+)
+# MULTi / Dual-Audio: English IS present, but so is a foreign track — and the
+# foreign one is often flagged default (the French-default "multi" Family Guy
+# that played 2026-08-29). Ranked BELOW clean English so an English-only source
+# probes first; the ffprobe default-track gate is the hard backstop.
+_MULTI_AUDIO_MARKER = re.compile(
+    r"\b(multi|dual[\s._-]?audio|dualaudio)\b",
     re.IGNORECASE,
 )
 _FOREIGN_AUDIO_MARKER = re.compile(
@@ -112,16 +119,25 @@ def _tier_score(text: str, tiers, default: int) -> int:
 
 
 def _language_rank(stream: Dict) -> int:
-    """2 = English audio present, 1 = unmarked (English original by default),
-    0 = foreign-dub only. Trusts the source's structured `languages` list first
-    (Zilean), then falls back to reading the release name."""
+    """3 = English-only audio, 2 = multi/dual (English + foreign track),
+    1 = unmarked (English original by default), 0 = foreign-dub only. Trusts the
+    source's structured `languages` list first (Zilean), then falls back to
+    reading the release name. Multi sits below clean English because its foreign
+    track is often flagged default and would auto-play (the ffprobe default-track
+    gate is the hard backstop; this just probes the safer source first)."""
     langs = stream.get("languages") or []
     if langs:
         norm = {str(l).strip().lower()[:2] for l in langs}
-        return 2 if "en" in norm else 0
+        has_en = "en" in norm
+        has_foreign = bool(norm - {"en", ""})
+        if has_en and has_foreign:
+            return 2
+        return 3 if has_en else 0
     text = f"{stream.get('title', '')} {stream.get('name', '')}"
-    if _ENGLISH_AUDIO_MARKER.search(text):
+    if _MULTI_AUDIO_MARKER.search(text):
         return 2
+    if _ENGLISH_AUDIO_MARKER.search(text):
+        return 3
     if _FOREIGN_AUDIO_MARKER.search(text):
         return 0
     return 1

@@ -68,6 +68,9 @@ class ProbeResult:
     audio_codec: Optional[str] = None
     audio_langs: List[str] = field(default_factory=list)
     sub_langs: List[str] = field(default_factory=list)
+    # Language of the audio track a player will actually auto-select: the
+    # default-flagged track, or the first track when none is flagged default.
+    default_audio_lang: Optional[str] = None
     # Dolby Vision profile of the video stream (None if not DV). 5 = single-layer
     # DV with no HDR10 fallback (the green/purple culprit on non-DV players).
     dv_profile: Optional[int] = None
@@ -124,6 +127,11 @@ class StreamValidator:
             "-show_entries",
             "format=format_name,duration:stream=codec_name,codec_type:"
             "stream_tags=language,title:"
+            # Per-track default flag — players auto-select the default-flagged
+            # audio track (or the first if none flagged). Used to reject a file
+            # whose DEFAULT audio is a foreign dub even when English exists on a
+            # later track (e.g. a "multi" release with French as track 0).
+            "stream_disposition=default:"
             # Dolby Vision config record (attached to the video stream when
             # present) — used to reject Profile 5 / no-HDR10-fallback sources
             # that render green+purple on non-DV players.
@@ -197,6 +205,19 @@ class StreamValidator:
         audio_langs = [_norm_lang((s.get("tags") or {}).get("language")) for s in audio_streams]
         sub_langs = [_norm_lang((s.get("tags") or {}).get("language")) for s in sub_streams]
 
+        # Which audio track will a player auto-play? The one flagged default,
+        # else the first. This is the track the household actually HEARS, so the
+        # language gate below judges it — not merely "is English present anywhere".
+        default_audio = next(
+            (s for s in audio_streams if (s.get("disposition") or {}).get("default") == 1),
+            audio_streams[0] if audio_streams else None,
+        )
+        default_audio_lang = (
+            _norm_lang((default_audio.get("tags") or {}).get("language"))
+            if default_audio is not None
+            else None
+        )
+
         format_name = fmt.get("format_name")
         video_codec = (video or {}).get("codec_name")
         audio_codec = (audio or {}).get("codec_name")
@@ -225,6 +246,7 @@ class StreamValidator:
             audio_codec=audio_codec,
             audio_langs=audio_langs,
             sub_langs=sub_langs,
+            default_audio_lang=default_audio_lang,
             dv_profile=dv_profile,
             dv_bl_compat=dv_bl_compat,
         )
@@ -271,6 +293,23 @@ class StreamValidator:
             result.ok = False
             result.reason = f"audio_codec_denied ({audio_codec})"
             return result
+
+        # Default-track gate: reject when the audio the player auto-selects is an
+        # explicit foreign language, EVEN if English exists on a later track. A
+        # "multi" release with French as track 0 (langs=['fre','eng']) otherwise
+        # sails through the "is English present" gate below and plays in French.
+        # Untagged/neutral defaults (und/mul/eng) pass — English is often the
+        # untagged first track.
+        if self.policy.require_preferred_audio and default_audio_lang is not None:
+            preferred = {_norm_lang(l) for l in self.policy.preferred_audio_langs}
+            acceptable = preferred | NEUTRAL_AUDIO_LANGS
+            if default_audio_lang not in acceptable:
+                result.ok = False
+                result.reason = (
+                    f"foreign_default_audio (default={default_audio_lang} "
+                    f"audio={audio_langs}; want one of {sorted(preferred)})"
+                )
+                return result
 
         # Language gate: reject foreign-only dubs so we hear English/original
         # audio. Passes when ANY audio track is preferred OR neutral/untagged
