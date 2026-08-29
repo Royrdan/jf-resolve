@@ -49,7 +49,15 @@ class TorBoxService:
 
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.headers = {"Authorization": f"Bearer {api_key}"}
+        self.headers = {
+            "Authorization": f"Bearer {api_key}",
+            # TorBox's API is behind Cloudflare, which blocks default Python client
+            # User-Agents (httpx/urllib) with "error code 1010". A normal UA passes.
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/128.0 Safari/537.36"
+            ),
+        }
 
     # ------------------------------------------------------------------
     # Low-level request choke-point
