@@ -40,6 +40,12 @@ DEFAULT_VIDEO_DENYLIST: List[str] = ["av1"]
 DEFAULT_AUDIO_DENYLIST: List[str] = []
 DEFAULT_CONTAINER_DENYLIST: List[str] = []
 
+# Lossless/HD audio codecs the household's internal ExoPlayer player cannot decode
+# or passthrough on its hardware -> a source whose ONLY audio is one of these plays
+# silently. Used to flag DTS/TrueHD-only sources so the resolver can prefer a source
+# that also carries a decodable track (AC3/EAC3/AAC/...).
+UNDECODABLE_AUDIO_CODECS: List[str] = ["dts", "dca", "truehd", "mlp"]
+
 
 # Audio language tags that are NOT a specific foreign language — treat as
 # acceptable so we never reject a legit English/original release. English is
@@ -75,6 +81,10 @@ class ProbeResult:
     # DV with no HDR10 fallback (the green/purple culprit on non-DV players).
     dv_profile: Optional[int] = None
     dv_bl_compat: Optional[int] = None
+    # True if the source carries at least one audio track the internal player can
+    # decode (i.e. not a DTS/TrueHD-only file). Neutral (True) when a source has no
+    # audio streams at all — audio-less sources are judged by other gates.
+    has_decodable_audio: bool = True
 
 
 @dataclass
@@ -205,6 +215,14 @@ class StreamValidator:
         audio_langs = [_norm_lang((s.get("tags") or {}).get("language")) for s in audio_streams]
         sub_langs = [_norm_lang((s.get("tags") or {}).get("language")) for s in sub_streams]
 
+        # Does the source carry at least one player-decodable audio track? A file
+        # whose every audio stream is DTS/TrueHD plays silently on the internal
+        # player. Neutral (True) when there are no audio streams to judge.
+        has_decodable_audio = (not audio_streams) or any(
+            (s.get("codec_name") or "").lower() not in UNDECODABLE_AUDIO_CODECS
+            for s in audio_streams
+        )
+
         # Which audio track will a player auto-play? The one flagged default,
         # else the first. This is the track the household actually HEARS, so the
         # language gate below judges it — not merely "is English present anywhere".
@@ -249,6 +267,7 @@ class StreamValidator:
             default_audio_lang=default_audio_lang,
             dv_profile=dv_profile,
             dv_bl_compat=dv_bl_compat,
+            has_decodable_audio=has_decodable_audio,
         )
 
         # Liveness: must actually contain a video stream.

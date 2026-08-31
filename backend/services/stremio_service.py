@@ -107,13 +107,22 @@ _CODEC_TIERS = [
     (re.compile(r"\b(mpeg-?2|vc-?1)\b", re.IGNORECASE), 1),
     (re.compile(r"\b(xvid|divx)\b", re.IGNORECASE), 0),
 ]
+# Audio ranked for THIS household's player, which CANNOT decode DTS/TrueHD at
+# all (those play silently and are hard-rejected at validation). So decodable
+# codecs rank HIGH and DTS/TrueHD/MLP rank at the BOTTOM — the walk probes a
+# servable source first and wastes fewer probes on sources that will be rejected.
+# _tier_score takes the HIGHEST matching tier, so a "DDP 5.1 Atmos" name still
+# scores on DDP (4); only a source whose sole audio marker is atmos/TrueHD/DTS
+# (potentially undecodable) drops to the bottom.
 _AUDIO_TIERS = [
-    (re.compile(r"\b(atmos|truehd|dts[\s._-]?hd|dts[\s._-]?x)\b", re.IGNORECASE), 4),
-    (re.compile(r"\bdts\b", re.IGNORECASE), 3),
-    (re.compile(r"\b(ddp|dd\+|eac3|e-ac-3)\b", re.IGNORECASE), 3),
-    (re.compile(r"\b(dd|ac3|ac-3)\b", re.IGNORECASE), 2),
-    (re.compile(r"\baac\b", re.IGNORECASE), 1),
-    (re.compile(r"\b(mp3|opus|vorbis)\b", re.IGNORECASE), 0),
+    # \d* so "DDP5.1" / "DD+5.1" / "AC3 5.1" still match (the digits sit between
+    # the codec token and the word boundary).
+    (re.compile(r"\b(?:ddp|dd\+|eac3|e-?ac-?3)\d*\b", re.IGNORECASE), 4),
+    (re.compile(r"\b(?:dd|ac-?3)\d*\b", re.IGNORECASE), 3),
+    (re.compile(r"\baac\b", re.IGNORECASE), 2),
+    (re.compile(r"\b(mp3|opus|vorbis|flac|pcm)\b", re.IGNORECASE), 1),
+    (re.compile(
+        r"\b(atmos|truehd|dts[\s._-]?hd|dts[\s._-]?x|dts|mlp)\b", re.IGNORECASE), 0),
 ]
 
 
@@ -162,14 +171,27 @@ def _codec_field_score(stream: Dict):
 
 
 def _audio_field_score(stream: Dict):
-    """Map the parsed `audio` list (e.g. ['Atmos','Dolby Digital']) onto the
-    name-based _AUDIO_TIERS scale. Highest matching component wins."""
+    """Map Zilean's parsed `audio` list onto the same 0-4 scale as _AUDIO_TIERS.
+    The field spells codecs out ('Dolby Digital Plus', 'DTS-HD MA', 'TrueHD',
+    'Atmos') rather than the release-name abbreviations, so it needs its own
+    lookup. Decodable codecs are checked FIRST, so a source that carries BOTH a
+    DTS track and an AC3 track scores on the AC3 (it's servable); only a source
+    whose every track is DTS/TrueHD/atmos-undecodable falls to 0."""
     audio = stream.get("audio") or []
     if not audio:
         return None
-    blob = " ".join(str(a) for a in audio)
-    score = _tier_score(blob, _AUDIO_TIERS, -1)
-    return score if score >= 0 else None
+    blob = " ".join(str(a) for a in audio).lower()
+    if any(k in blob for k in ("digital plus", "eac3", "e-ac-3", "ddp", "dd+")):
+        return 4
+    if "dolby digital" in blob or re.search(r"\bac-?3\b", blob):
+        return 3
+    if "aac" in blob:
+        return 2
+    if any(k in blob for k in ("flac", "pcm", "opus", "mp3", "vorbis")):
+        return 1
+    if any(k in blob for k in ("dts", "truehd", "true hd", "mlp", "atmos")):
+        return 0
+    return None
 
 
 def _merged_tier(text: str, tiers, field_score, default: int) -> int:

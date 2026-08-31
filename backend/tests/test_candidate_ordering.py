@@ -128,5 +128,23 @@ def test_structured_size_breaks_ties_bigger_first():
     assert order[0] == "hash11"
 
 
+def test_dts_audio_ranks_below_decodable():
+    """This player can't decode DTS/TrueHD, so a DTS-named copy must probe AFTER
+    an EAC3/AC3 one of otherwise-identical quality (they'd be hard-rejected)."""
+    eac3 = _cand(20, "Film 2160p WEB-DL EAC3 5 1 x265", quality="WEB-DL",
+                 codec="hevc", audio=["Dolby Digital Plus"], size=10_000_000_000)
+    dts = _cand(21, "Film 2160p WEB-DL DTS-HD MA 5 1 x265", quality="WEB-DL",
+                codec="hevc", audio=["DTS-HD MA"], size=10_000_000_000)
+    inst = S.StremioService.__new__(S.StremioService)
+    order = inst.ordered_candidates([dts, eac3], "4k", fallback_enabled=True)
+    assert order[0] == "hash20"  # the EAC3 copy leads
+
+
+def test_ddp_atmos_still_ranks_high():
+    """A 'DDP ... Atmos' name is decodable (EAC3) and must NOT be dragged down by
+    the bare-atmos bottom tier — _tier_score takes the highest matching tier."""
+    assert S._tier_score("Film 2160p WEB-DL DDP5 1 Atmos", S._AUDIO_TIERS, 2) == 4
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
