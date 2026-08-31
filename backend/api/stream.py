@@ -451,11 +451,13 @@ async def resolve_stream(
         # preferred-language subtitle track; only fall back to a subtitle-less
         # source when no subtitled one is available.
         prefer_subtitles = await settings.get("prefer_subtitles", True)
-        # Soft preference (not a hard gate): prefer a source carrying at least one
-        # audio track the internal player can decode (AC3/EAC3/AAC/...), so a
-        # DTS/TrueHD-only file — which plays silently — is only served when no
-        # decodable-audio source is available.
-        prefer_decodable_audio = await settings.get("prefer_decodable_audio", True)
+        # HARD requirement: this household's player cannot decode DTS/TrueHD at
+        # all, so a DTS/TrueHD-only file plays SILENTLY and is unservable. A
+        # source MUST carry at least one player-decodable audio track (AC3/EAC3/
+        # AAC/...) or it is rejected outright — never held, never served. (The
+        # `prefer_decodable_audio` setting key is retained for compatibility; it
+        # now gates a hard reject rather than a soft preference.)
+        require_decodable_audio = await settings.get("prefer_decodable_audio", True)
         preferred_subtitle_langs = await settings.get("preferred_subtitle_langs", ["eng"])
         _pref_sub_set = {
             "eng" if s.strip().lower() in ("en", "eng", "english") else s.strip().lower()
@@ -840,11 +842,10 @@ async def resolve_stream(
         held_no_sub_url = None
         held_no_sub_rank = -1
         sub_scans = 0
-        # Parallel hold for the audio preference: best-quality DTS/TrueHD-only
-        # source seen, served only if no decodable-audio source turns up.
-        held_no_audio_url = None
-        held_no_audio_rank = -1
-        audio_scans = 0
+        # DTS/TrueHD-only sources are hard-rejected (see require_decodable_audio),
+        # so there is no "held" fallback for them — a silent source is never
+        # served. Kept only as a counter for logging how many we skipped.
+        no_audio_rejects = 0
         async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
             for retry in range(MAX_EPISODE_RETRIES + 1):
                 if retry > 0:
@@ -1049,6 +1050,21 @@ async def resolve_stream(
                             f"subs={probe.sub_langs} dur={probe.duration}"
                         )
 
+                        # Audio (HARD gate — checked FIRST, before any soft
+                        # preference can hold this source): the player cannot
+                        # decode DTS/TrueHD, so a source whose every audio track
+                        # is DTS/TrueHD plays silently and is unservable. Reject
+                        # it outright and walk on — never hold it, never serve it
+                        # as a subtitle/quality fallback.
+                        if require_decodable_audio and not probe.has_decodable_audio:
+                            no_audio_rejects += 1
+                            log_service.info(
+                                f"Rejected DTS/TrueHD-only source for {state_key} "
+                                f"(a={probe.audio_codec}) — no player-decodable "
+                                f"audio track; trying next candidate."
+                            )
+                            continue
+
                         # Subtitle preference (soft): prefer a source carrying a
                         # usable subtitle track, but scan at most 3 playable
                         # candidates and NEVER demote video quality to get one.
@@ -1086,32 +1102,6 @@ async def resolve_stream(
                                 # Keep looking for a subtitled candidate.
                                 continue
 
-                        # Audio preference (soft): avoid DTS/TrueHD-only sources
-                        # the internal player can't decode (they play silently).
-                        # Hold the best-quality such source and keep scanning
-                        # (bounded at 3) for one with a decodable audio track.
-                        if prefer_decodable_audio and not probe.has_decodable_audio:
-                            cand_rank = _QUALITY_RANK.get(
-                                stremio.detect_quality(
-                                    {"title": resolved_name or resolved}
-                                ),
-                                1,
-                            )
-                            if held_no_audio_url is None or cand_rank > held_no_audio_rank:
-                                held_no_audio_url = resolved
-                                held_no_audio_rank = cand_rank
-                            audio_scans += 1
-                            if audio_scans >= 3:
-                                log_service.info(
-                                    f"Audio hunt capped at 3 scans for {state_key}; "
-                                    f"serving best-quality playable source "
-                                    f"(DTS/TrueHD-only)."
-                                )
-                                final_url = held_no_audio_url
-                                break
-                            # Keep looking for a decodable-audio candidate.
-                            continue
-
                     # Correct episode (or movie/unknown), playable, and either
                     # subtitle-satisfied or subtitles not required — accept this
                     # first (best-quality) acceptable source.
@@ -1131,11 +1121,14 @@ async def resolve_stream(
         if final_url is None and held_no_sub_url is not None:
             final_url = held_no_sub_url
 
-        # Audio hunt ran out of candidates without a decodable-audio source:
-        # serve the best-quality DTS/TrueHD-only source we held (audible only if
-        # the player later switches tracks, but better than a not-cached stub).
-        if final_url is None and held_no_audio_url is not None:
-            final_url = held_no_audio_url
+        # No decodable-audio fallback exists by design: DTS/TrueHD-only sources
+        # are hard-rejected above (they play silently on this player), so the walk
+        # simply moves on to Pass 2 / not-cached rather than serving a silent file.
+        if no_audio_rejects:
+            log_service.info(
+                f"{state_key}: skipped {no_audio_rejects} DTS/TrueHD-only "
+                f"source(s) with no player-decodable audio track."
+            )
 
         # ── Pass 2: uncached load-and-wait (opt-in) ────────────────────────
         # Pass 1 walked every candidate cached-only and found nothing playable.
