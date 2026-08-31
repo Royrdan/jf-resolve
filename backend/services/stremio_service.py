@@ -24,7 +24,15 @@ CAM_PATTERN = re.compile(
 # rd_service.UPSCALE_PATTERN / ARCHIVE_EXT_PATTERN. Streams matching these are
 # pushed to the BOTTOM of the candidate order (last resort), so a genuine 1080p
 # is always tried before a fake-4K upscale or a .rar archive.
-_UPSCALE_PATTERN = re.compile(r"\b(?:ai[\s._\-]*)?upscal(?:e|ed|ing)\b", re.IGNORECASE)
+_UPSCALE_PATTERN = re.compile(
+    r"\b(?:ai[\s._\-]*)?upscal(?:e|ed|ing)\b"
+    # Fake-4K "AI" tag adjacent to a resolution token — e.g. "2025 4K AI mkv",
+    # "2160p AI", "AI 4K". Anchored to a resolution word so a real "A.I."-titled
+    # film or an "ai" inside a group tag is never mistaken for an upscale.
+    r"|\b(?:4k|2160p|1080p|uhd|hd)[\s._\-]*ai\b"
+    r"|\bai[\s._\-]*(?:4k|2160p|1080p|uhd|enhanced?)\b",
+    re.IGNORECASE,
+)
 _ARCHIVE_EXT_PATTERN = re.compile(
     r"\.(?:rar|zip|7z|tar|gz|bz2|r\d{2,3}|z\d{2}|\d{3})$", re.IGNORECASE
 )
@@ -118,6 +126,73 @@ def _tier_score(text: str, tiers, default: int) -> int:
     return default if best is None else best
 
 
+# ── Structured-field signals (Zilean RTN parse) ─────────────────────────────
+# The candidate dicts from ZileanService carry parsed metadata fields. These are
+# more reliable than name-scraping when present (survey 2026-08-31: quality 82%,
+# codec 82%, size 100% populated). Each helper maps a structured field onto the
+# SAME 0-5 / 0-4 scale as its name-based sibling above, so the sort key can take
+# max(name_score, field_score) — a blank field never downgrades a name hit, and
+# sources without these keys (Stremio/TorBox) score None and fall back to names.
+_QUALITY_FIELD_SCORE = {
+    "bluray remux": 5, "uhd bluray": 5, "remux": 5,
+    "bluray": 4, "bdrip": 4, "bdmux": 4,
+    "web-dl": 3, "webdl": 3, "webmux": 3,
+    "brrip": 3, "web-dlrip": 2, "web": 2, "webrip": 2,
+    "hdtv": 1, "hdrip": 1, "bdrip 480p": 1, "dvdrip": 1, "dvd": 1, "uhdrip": 1,
+    # Cam-tier: negative so it sorts BELOW everything (the validator already
+    # blocks it from auto-serve; this keeps it last in the probe order too).
+    "cam": -1, "telesync": -1, "telecine": -1, "scr": -1, "hdcam": -1,
+}
+_CODEC_FIELD_SCORE = {
+    "hevc": 3, "x265": 3, "h265": 3, "av1": 3,
+    "avc": 3, "x264": 3, "h264": 3,
+    "mpeg2": 1, "mpeg-2": 1, "vc1": 1, "vc-1": 1,
+    "xvid": 0, "divx": 0,
+}
+
+
+def _quality_field_score(stream: Dict):
+    q = str(stream.get("quality") or "").strip().lower()
+    return _QUALITY_FIELD_SCORE.get(q)
+
+
+def _codec_field_score(stream: Dict):
+    c = str(stream.get("codec") or "").strip().lower()
+    return _CODEC_FIELD_SCORE.get(c)
+
+
+def _audio_field_score(stream: Dict):
+    """Map the parsed `audio` list (e.g. ['Atmos','Dolby Digital']) onto the
+    name-based _AUDIO_TIERS scale. Highest matching component wins."""
+    audio = stream.get("audio") or []
+    if not audio:
+        return None
+    blob = " ".join(str(a) for a in audio)
+    score = _tier_score(blob, _AUDIO_TIERS, -1)
+    return score if score >= 0 else None
+
+
+def _merged_tier(text: str, tiers, field_score, default: int) -> int:
+    """max(name-derived score, structured-field score) — either may be absent.
+    _tier_score always returns a number, so probe it with a sentinel to detect
+    'no name match' and fall back to the structured field / default."""
+    ns = _tier_score(text, tiers, -999)
+    name_score = None if ns == -999 else ns
+    candidates = [s for s in (name_score, field_score) if s is not None]
+    return max(candidates) if candidates else default
+
+
+def _size_tier(stream: Dict) -> int:
+    """Bigger file at a given resolution ≈ higher bitrate ≈ better encode (and
+    separates real 2160p from tiny 'AI upscale' rips — the field `bitrate` is
+    dead/0% but `size` is 100% populated). Capped so a giant remux doesn't always
+    trump. 0 when size is unknown → neutral tie-break."""
+    b = stream.get("sizeBytes") or 0
+    if b <= 0:
+        return 0
+    return min(int(b / 1_000_000_000), 40)  # whole GB, capped at 40
+
+
 def _language_rank(stream: Dict) -> int:
     """3 = English-only audio, 2 = multi/dual (English + foreign track),
     1 = unmarked (English original by default), 0 = foreign-dub only. Trusts the
@@ -133,6 +208,11 @@ def _language_rank(stream: Dict) -> int:
         if has_en and has_foreign:
             return 2
         return 3 if has_en else 0
+    # No structured language list. Zilean's `dubbed` boolean still flags many
+    # foreign dubs whose release name is otherwise unmarked (the untagged-Russian
+    # case that stalled KPop Demon Hunters 2026-08-31) — trust it and de-rank.
+    if stream.get("dubbed"):
+        return 0
     text = f"{stream.get('title', '')} {stream.get('name', '')}"
     if _MULTI_AUDIO_MARKER.search(text):
         return 2
@@ -618,11 +698,14 @@ class StremioService:
           3. Not a 3D/SBS edition        (broken-looking on normal players)
           4. Container   mkv>mp4>...     (best embedded subs / multi-audio)
           5. Source tier remux>web-dl>.. (better encode at same resolution)
-          6. Codec       h265/h264>xvid
-          7. Audio       atmos>ddp>ac3>aac
-          8. Subtitle hint in the name   (weak; real subs handled post-probe)
+          6. Size        bigger≈better bitrate (real 2160p > tiny AI upscale)
+          7. Codec       h265/h264>xvid
+          8. Audio       atmos>ddp>ac3>aac
+          9. Subtitle hint in the name   (weak; real subs handled post-probe)
 
-        REORDER ONLY — nothing here drops a candidate.
+        Source/codec/audio each take max(release-name score, Zilean structured
+        field score); size uses the structured `sizeBytes`. REORDER ONLY —
+        nothing here drops a candidate.
         """
         text = f"{stream.get('title', '')} {stream.get('name', '')}"
         low = text.lower()
@@ -640,9 +723,10 @@ class StremioService:
             ep_specific,
             edition_ok,
             _tier_score(text, _CONTAINER_TIERS, 2),
-            _tier_score(text, _SOURCE_TIERS, 2),
-            _tier_score(text, _CODEC_TIERS, 2),
-            _tier_score(text, _AUDIO_TIERS, 2),
+            _merged_tier(text, _SOURCE_TIERS, _quality_field_score(stream), 2),
+            _size_tier(stream),
+            _merged_tier(text, _CODEC_TIERS, _codec_field_score(stream), 2),
+            _merged_tier(text, _AUDIO_TIERS, _audio_field_score(stream), 2),
             1 if _SUBTITLE_HINT_MARKER.search(text) else 0,
         )
 

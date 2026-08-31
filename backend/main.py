@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .api import auth, discover, library, search, stream, system
+from .api import auth, discover, library, search, segments, stream, system
 from .api import settings as settings_api
 from .api.auth import get_current_user, get_current_user_optional
 from .config import settings
@@ -72,6 +72,7 @@ app.include_router(auth.router)
 app.include_router(discover.router)
 app.include_router(search.router)
 app.include_router(library.router)
+app.include_router(segments.router)
 app.include_router(settings_api.router)
 app.include_router(stream.router)
 app.include_router(system.router)

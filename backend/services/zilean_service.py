@@ -37,6 +37,15 @@ import httpx
 from .log_service import log_service
 
 
+def _to_int(v) -> int:
+    """Best-effort parse of Zilean's `size` (a byte-count string) to int.
+    Returns 0 when absent/unparseable so the size-tier signal stays neutral."""
+    try:
+        return int(str(v).strip())
+    except (TypeError, ValueError):
+        return 0
+
+
 class ZileanService:
     """Search a self-hosted Zilean instance for torrent infohashes."""
 
@@ -133,6 +142,20 @@ class ZileanService:
                     # Carried through so the candidate sorter can rank by likely
                     # audio language WITHOUT a probe. Kept as-is (ISO-ish codes).
                     "languages": row.get("languages") or row.get("language") or [],
+                    # Structured RTN-parsed fields (survey 2026-08-31: quality
+                    # 82% / codec 82% / size 100% / dubbed 17% populated across
+                    # the DB — reliable enough to REORDER on without a probe).
+                    # The sorter merges these with release-name parsing (max), so
+                    # a blank field never downgrades a name-detected signal and
+                    # non-Zilean sources (which lack these keys) are unaffected.
+                    "quality": row.get("quality") or "",
+                    "codec": row.get("codec") or "",
+                    "audio": row.get("audio") or [],
+                    "channels": row.get("channels") or [],
+                    "hdr": row.get("hdr") or [],
+                    "dubbed": bool(row.get("dubbed")),
+                    "subbed": bool(row.get("subbed")),
+                    "sizeBytes": _to_int(row.get("size")),
                 }
             )
 

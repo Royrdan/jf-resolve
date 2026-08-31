@@ -1,0 +1,9 @@
+services:
+  jfresolve:
+    build: .
+    container_name: jfresolve
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /opt/jfresolve-data:/data
+      - /share/jellyfin/library:/share/jellyfin/library

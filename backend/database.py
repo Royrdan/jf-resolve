@@ -91,7 +91,7 @@ async def init_db():
     Safe to call multiple times - only creates tables that don't exist
     """
     # Import all models to ensure they're registered with Base.metadata
-    from .models import User, LibraryItem, Setting, FailoverState  # noqa: F401
+    from .models import User, LibraryItem, Setting, FailoverState, MediaSegment, SeasonFingerprint  # noqa: F401
 
     async with engine.begin() as conn:
 
