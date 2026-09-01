@@ -847,6 +847,123 @@ async def resolve_stream(
         # served. Kept only as a counter for logging how many we skipped.
         no_audio_rejects = 0
         async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
+            # ── Parallel pre-flight race (torbox only) ────────────────────────
+            # The walk below is strictly serial: each candidate's convert + HEAD
+            # + ffprobe runs one after another. A title whose leading sources are
+            # dead links or foreign-audio dubs can burn 30-50s walking the list
+            # before it reaches a playable English source — long enough that the
+            # player gives up, then the now-cached result plays instantly on the
+            # user's SECOND press (the "works the second time" complaint). Here we
+            # RACE the top N candidates concurrently, warming a shared probe cache
+            # the serial walk then consumes (instant). Crucially this is a race,
+            # not a batch: the moment one candidate warms as playable + English +
+            # decodable-audio, we STOP launching probes and hand off — so a title
+            # whose good source is shallow finishes in a couple of seconds instead
+            # of always paying the full window. A hard deadline bounds the dig for
+            # deep-buried sources; whatever isn't warmed, the walk probes live.
+            # Pre-flight can therefore only help, never hurt. Torbox only: it is a
+            # lenient, multi-IP cache service, so a few concurrent reads are safe;
+            # RD (single-IP, rate-limited) keeps the plain serial walk.
+            preflight_convert: dict = {}   # infohash -> direct url (or None)
+            preflight_probe: dict = {}     # resolved url -> ProbeResult
+            if (
+                debrid_provider == "torbox"
+                and rd_converter is not None
+                and len(candidates) > 1
+                and await settings.get("parallel_preflight_enabled", True)
+            ):
+                pf_n = await settings.get("parallel_preflight_count", 16)
+                # Concurrency is capped SEPARATELY from how many candidates we may
+                # dig through: firing too many ffprobe pulls at the TorBox CDN at
+                # once provokes transient TLS resets that look like dead links and
+                # falsely reject good sources. A gentle cap keeps the latency win
+                # without stressing the CDN into false negatives.
+                pf_conc = await settings.get("parallel_preflight_concurrency", 6)
+                pf_deadline = await settings.get(
+                    "parallel_preflight_deadline_seconds", 12
+                )
+                pf_targets = candidates[:pf_n]
+                pf_sem = asyncio.Semaphore(max(1, pf_conc))
+                pf_winner = asyncio.Event()
+
+                async def _preflight(cand_url):
+                    async with pf_sem:
+                        # A good source already surfaced — don't launch more work.
+                        if pf_winner.is_set():
+                            return
+                        try:
+                            ih, _fi, fname, is_tm = _parse_stream_ref(cand_url)
+                            if not ih:
+                                return
+                            direct = await rd_converter.resolve_infohash(
+                                ih, season, episode, filename_hint=fname
+                            )
+                            preflight_convert[ih] = direct
+                            play_url = direct or (None if is_tm else cand_url)
+                            if not play_url:
+                                return
+                            resolved = play_url
+                            if not any(
+                                d in play_url
+                                for d in ("torrentio", "real-debrid", "elfhosted")
+                            ):
+                                try:
+                                    r = await client.head(play_url, timeout=8.0)
+                                    if r.status_code != 405:
+                                        resolved = str(r.url)
+                                except Exception:
+                                    # Let the walk do its GET-fallback + probe.
+                                    return
+                            if validator is not None:
+                                probe = await validator.validate(resolved)
+                                preflight_probe[resolved] = probe
+                                # First fully-acceptable source (playable, English
+                                # default audio, and a decodable audio track) — the
+                                # walk will serve this; stop digging.
+                                if probe.ok and probe.has_decodable_audio:
+                                    pf_winner.set()
+                        except Exception as e:
+                            log_service.info(
+                                f"Pre-flight skip for {state_key} "
+                                f"([{type(e).__name__}] {e})"
+                            )
+
+                pf_tasks = [
+                    asyncio.create_task(_preflight(u)) for u in pf_targets
+                ]
+                pf_all = asyncio.gather(*pf_tasks, return_exceptions=True)
+                pf_win_wait = asyncio.create_task(pf_winner.wait())
+                try:
+                    # Proceed the instant a good source is warmed, or when every
+                    # probe has finished, or when the deadline expires.
+                    await asyncio.wait(
+                        {pf_all, pf_win_wait},
+                        timeout=pf_deadline,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                except Exception as e:
+                    log_service.warning(
+                        f"Parallel pre-flight failed for {state_key} "
+                        f"([{type(e).__name__}] {e}) — walk proceeds serially."
+                    )
+                finally:
+                    # Stop any still-running probes and DRAIN them so their
+                    # CancelledError is retrieved (otherwise asyncio logs a
+                    # traceback for every cancelled task and buries real errors).
+                    pf_win_wait.cancel()
+                    for t in pf_tasks:
+                        if not t.done():
+                            t.cancel()
+                    await asyncio.gather(
+                        pf_all, pf_win_wait, *pf_tasks, return_exceptions=True
+                    )
+                log_service.info(
+                    f"Parallel pre-flight for {state_key}: warmed "
+                    f"{len(preflight_probe)} source(s), "
+                    f"{'playable source found' if pf_winner.is_set() else 'no winner yet'}"
+                    f" — serial walk consumes the cache."
+                )
+
             for retry in range(MAX_EPISODE_RETRIES + 1):
                 if retry > 0:
                     retry_index += 1
@@ -912,9 +1029,13 @@ async def resolve_stream(
                             )
                         else:
                             rd_probes_used += 1
-                            direct = await rd_converter.resolve_infohash(
-                                infohash, season, episode, filename_hint=fname
-                            )
+                            if infohash in preflight_convert:
+                                # Warmed concurrently in the pre-flight above.
+                                direct = preflight_convert[infohash]
+                            else:
+                                direct = await rd_converter.resolve_infohash(
+                                    infohash, season, episode, filename_hint=fname
+                                )
                             if direct:
                                 log_service.stream(
                                     f"{debrid_provider}-converted infohash {infohash[:8]} for "
@@ -1029,7 +1150,11 @@ async def resolve_stream(
                     # Playability gate: probe the resolved file and reject dead
                     # links, non-media, too-short, or unplayable-codec streams.
                     if validator is not None:
-                        probe = await validator.validate(resolved)
+                        # Reuse the concurrent pre-flight probe when we have one
+                        # for this exact resolved URL; otherwise probe live.
+                        probe = preflight_probe.get(resolved)
+                        if probe is None:
+                            probe = await validator.validate(resolved)
                         if not probe.ok:
                             log_service.warning(
                                 f"Validation rejected stream (attempt {retry + 1}/"

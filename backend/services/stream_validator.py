@@ -115,6 +115,12 @@ class StreamValidator:
 
     def __init__(self, policy: Optional[ValidationPolicy] = None):
         self.policy = policy or ValidationPolicy()
+        # Per-request probe memo: a validator is built fresh per resolve request,
+        # so this dedupes ffprobe across the paths that can probe the SAME URL in
+        # one request (the RD/torbox library lookup, the parallel pre-flight, and
+        # the serial candidate walk). A single dead-but-cached source therefore
+        # costs one probe timeout, not three. Keyed by the exact resolved URL.
+        self._probe_cache: dict = {}
 
     @staticmethod
     def available() -> bool:
@@ -184,6 +190,15 @@ class StreamValidator:
             return None
 
     async def validate(self, url: str) -> ProbeResult:
+        """Probe `url` (memoised per-request) and return playability."""
+        cached = self._probe_cache.get(url)
+        if cached is not None:
+            return cached
+        result = await self._validate(url)
+        self._probe_cache[url] = result
+        return result
+
+    async def _validate(self, url: str) -> ProbeResult:
         """Probe `url` and return whether it is playable under the policy."""
         # Filename-based foreign-dub gate (runs BEFORE ffprobe): some release
         # groups ship their non-English audio UNTAGGED, so the language gate
