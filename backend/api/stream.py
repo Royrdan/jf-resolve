@@ -522,6 +522,18 @@ async def resolve_stream(
                                 f"for {state_key} — falling back to Stremio addons"
                             )
                             rd_url = None
+                        elif require_decodable_audio and not rd_probe.has_decodable_audio:
+                            # This household's player cannot decode DTS/TrueHD, so a
+                            # DTS/TrueHD-only file plays silently. The Stremio walk
+                            # hard-rejects these (require_decodable_audio); the direct
+                            # path must too, or a cached DTS-only library hit bypasses
+                            # the guard entirely and gets served + cached.
+                            log_service.info(
+                                f"{debrid_provider} direct: match rejected "
+                                f"(DTS/TrueHD-only a={rd_probe.audio_codec}) for {state_key} "
+                                f"— no player-decodable audio track; falling back to Stremio addons"
+                            )
+                            rd_url = None
 
                     if rd_url:
                         log_service.stream(
