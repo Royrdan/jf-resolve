@@ -85,6 +85,11 @@ class ProbeResult:
     # decode (i.e. not a DTS/TrueHD-only file). Neutral (True) when a source has no
     # audio streams at all — audio-less sources are judged by other gates.
     has_decodable_audio: bool = True
+    # True if the DEFAULT (auto-played) audio track is itself player-decodable. A
+    # DTS/TrueHD-default file with a decodable secondary track has
+    # has_decodable_audio=True but default_audio_decodable=False — servable only if
+    # the player switches tracks, so the resolver prefers a decodable-default one.
+    default_audio_decodable: bool = True
 
 
 @dataclass
@@ -250,6 +255,12 @@ class StreamValidator:
             if default_audio is not None
             else None
         )
+        # Is the auto-played default track itself decodable? Neutral (True) when
+        # there is no audio at all.
+        default_audio_decodable = (default_audio is None) or (
+            (default_audio.get("codec_name") or "").lower()
+            not in UNDECODABLE_AUDIO_CODECS
+        )
 
         format_name = fmt.get("format_name")
         video_codec = (video or {}).get("codec_name")
@@ -283,6 +294,7 @@ class StreamValidator:
             dv_profile=dv_profile,
             dv_bl_compat=dv_bl_compat,
             has_decodable_audio=has_decodable_audio,
+            default_audio_decodable=default_audio_decodable,
         )
 
         # Liveness: must actually contain a video stream.

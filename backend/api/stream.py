@@ -486,6 +486,10 @@ async def resolve_stream(
                     "serving streams unvalidated"
                 )
 
+        # A direct library hit whose DEFAULT audio is DTS/TrueHD (but which does
+        # carry a decodable secondary track) is deferred here and used only if the
+        # walk finds no decodable-default source (see the fallback chain below).
+        direct_fallback_url = None
         if rd_api_key_val and rd_direct_enabled:
             rd_target_quality = quality
             rd_strict_quality = bool(quality and quality.lower() != "auto")
@@ -532,6 +536,18 @@ async def resolve_stream(
                                 f"{debrid_provider} direct: match rejected "
                                 f"(DTS/TrueHD-only a={rd_probe.audio_codec}) for {state_key} "
                                 f"— no player-decodable audio track; falling back to Stremio addons"
+                            )
+                            rd_url = None
+                        elif require_decodable_audio and not rd_probe.default_audio_decodable:
+                            # Default (auto-played) track is DTS/TrueHD but a
+                            # decodable secondary exists. Prefer a decodable-default
+                            # source: defer this hit and fall through to the walk;
+                            # used only if the walk finds nothing cleaner.
+                            direct_fallback_url = rd_url
+                            log_service.info(
+                                f"{debrid_provider} direct: deferring DTS/TrueHD-default hit "
+                                f"(a={rd_probe.audio_codec}) for {state_key} — preferring a "
+                                f"decodable-default source via the walk"
                             )
                             rd_url = None
 
@@ -858,6 +874,11 @@ async def resolve_stream(
         # so there is no "held" fallback for them — a silent source is never
         # served. Kept only as a counter for logging how many we skipped.
         no_audio_rejects = 0
+        # A source whose DEFAULT audio track is DTS/TrueHD but which also carries a
+        # decodable secondary track. Playable only if the player switches tracks,
+        # so it's held as a LAST resort — a decodable-default source always wins.
+        held_dts_default_url = None
+        held_dts_default_rank = -1
         async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
             # ── Parallel pre-flight race (torbox only) ────────────────────────
             # The walk below is strictly serial: each candidate's convert + HEAD
@@ -1202,6 +1223,32 @@ async def resolve_stream(
                             )
                             continue
 
+                        # Default-audio preference (soft): the player auto-plays the
+                        # DEFAULT audio track and cannot decode DTS/TrueHD, so a
+                        # source whose default track is DTS/TrueHD plays silently
+                        # unless the player switches tracks. Prefer a source whose
+                        # DEFAULT audio is itself decodable; hold this best-quality
+                        # one as a last resort and keep scanning for a cleaner one.
+                        if require_decodable_audio and not probe.default_audio_decodable:
+                            dd_rank = _QUALITY_RANK.get(
+                                stremio.detect_quality(
+                                    {"title": resolved_name or resolved}
+                                ),
+                                1,
+                            )
+                            if (
+                                held_dts_default_url is None
+                                or dd_rank > held_dts_default_rank
+                            ):
+                                held_dts_default_url = resolved
+                                held_dts_default_rank = dd_rank
+                            log_service.info(
+                                f"Deferred DTS/TrueHD-default source for {state_key} "
+                                f"(a={probe.audio_codec}) — default audio not "
+                                f"player-decodable; preferring a decodable-default source."
+                            )
+                            continue
+
                         # Subtitle preference (soft): prefer a source carrying a
                         # usable subtitle track, but scan at most 3 playable
                         # candidates and NEVER demote video quality to get one.
@@ -1257,6 +1304,15 @@ async def resolve_stream(
         # source we held.
         if final_url is None and held_no_sub_url is not None:
             final_url = held_no_sub_url
+        # Last resort: a source whose DEFAULT audio is DTS/TrueHD but which carries
+        # a decodable secondary track (playable only if the player switches tracks).
+        # Always ranked below any decodable-default source; above serving nothing.
+        if final_url is None and held_dts_default_url is not None:
+            final_url = held_dts_default_url
+        # Deferred direct library hit (DTS/TrueHD default) — used only if the walk
+        # produced no source at all.
+        if final_url is None and direct_fallback_url is not None:
+            final_url = direct_fallback_url
 
         # No decodable-audio fallback exists by design: DTS/TrueHD-only sources
         # are hard-rejected above (they play silently on this player), so the walk
