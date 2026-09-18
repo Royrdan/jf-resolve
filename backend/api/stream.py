@@ -4,6 +4,7 @@ import asyncio
 import httpx
 import re
 import time
+from dataclasses import replace as dc_replace
 from datetime import datetime
 from typing import Optional
 from urllib.parse import quote, unquote, urlparse
@@ -463,8 +464,37 @@ async def resolve_stream(
             "eng" if s.strip().lower() in ("en", "eng", "english") else s.strip().lower()
             for s in preferred_subtitle_langs
         }
+        def _has_preferred_sub(probe) -> bool:
+            """True when `probe` carries a preferred-language subtitle track.
+
+            Also True when the subtitle preference is off / unset, i.e. there is
+            nothing to satisfy. This is the SINGLE definition used by BOTH the
+            parallel pre-flight race and the serial walk — they previously
+            disagreed (the race ignored subtitles entirely), so the race would
+            declare a sub-less source the winner, cancel every other in-flight
+            probe, and hand the walk a source it then rejected. The walk was then
+            left to probe the remaining candidates live and serially, which is
+            exactly the 30-50s stall this predicate exists to prevent.
+            """
+            if not (prefer_subtitles and _pref_sub_set):
+                return True
+            return any(
+                (lang in _pref_sub_set) or lang in ("", "und", None)
+                for lang in probe.sub_langs
+            )
+
+        def _is_fully_acceptable(probe) -> bool:
+            """Would the serial walk SERVE this probe outright (no deferral)?"""
+            return (
+                probe.ok
+                and probe.has_decodable_audio
+                and (not require_decodable_audio or probe.default_audio_decodable)
+                and _has_preferred_sub(probe)
+            )
+
         validation_enabled = await settings.get("stream_validation_enabled", True)
         validator = None
+        walk_validator = None
         if validation_enabled:
             if StreamValidator.available():
                 policy = ValidationPolicy(
@@ -480,6 +510,19 @@ async def resolve_stream(
                     ),
                 )
                 validator = StreamValidator(policy)
+                # Shorter-timeout validator for the multi-candidate walk and the
+                # pre-flight race. The direct library hit is ONE probe where
+                # waiting out a slow-but-healthy source pays off; inside the walk
+                # there are many candidates, so failing fast and moving on beats
+                # stalling the whole resolve on a single slow link.
+                walk_validator = StreamValidator(
+                    dc_replace(
+                        policy,
+                        probe_timeout_seconds=await settings.get(
+                            "stream_probe_timeout_walk_seconds", 6
+                        ),
+                    )
+                )
             else:
                 log_service.warning(
                     "stream_validation_enabled but ffprobe is not installed — "
@@ -997,6 +1040,10 @@ async def resolve_stream(
                     f" — serial walk consumes the cache."
                 )
 
+            # Wall-clock budget for the subtitle hunt (see the gate below).
+            sub_hunt_budget = await settings.get("subtitle_hunt_budget_seconds", 10)
+            walk_started = time.monotonic()
+
             for retry in range(MAX_EPISODE_RETRIES + 1):
                 if retry > 0:
                     retry_index += 1
@@ -1187,7 +1234,9 @@ async def resolve_stream(
                         # for this exact resolved URL; otherwise probe live.
                         probe = preflight_probe.get(resolved)
                         if probe is None:
-                            probe = await validator.validate(resolved)
+                            probe = await (walk_validator or validator).validate(
+                                resolved
+                            )
                         if not probe.ok:
                             log_service.warning(
                                 f"Validation rejected stream (attempt {retry + 1}/"
@@ -1256,35 +1305,38 @@ async def resolve_stream(
                         # are almost always English on English releases. Bounding
                         # the hunt at 3 keeps our own (single-IP) RD unrestrict
                         # volume low while still finding embedded subs when close.
-                        if prefer_subtitles and _pref_sub_set:
-                            has_pref_sub = any(
-                                (lang in _pref_sub_set) or lang in ("", "und", None)
-                                for lang in probe.sub_langs
+                        if not _has_preferred_sub(probe):
+                            cand_rank = _QUALITY_RANK.get(
+                                stremio.detect_quality(
+                                    {"title": resolved_name or resolved}
+                                ),
+                                1,
                             )
-                            if not has_pref_sub:
-                                cand_rank = _QUALITY_RANK.get(
-                                    stremio.detect_quality(
-                                        {"title": resolved_name or resolved}
-                                    ),
-                                    1,
+                            # Hold the best-quality sub-less source and keep
+                            # scanning; a lower-res subbed source can never
+                            # displace it.
+                            if held_no_sub_url is None or cand_rank > held_no_sub_rank:
+                                held_no_sub_url = resolved
+                                held_no_sub_rank = cand_rank
+                            sub_scans += 1
+                            hunt_elapsed = time.monotonic() - walk_started
+                            # Bound the hunt by BOTH playable scans and wall clock.
+                            # The scan counter alone could never fire on a title
+                            # whose other candidates are foreign dubs / dead links
+                            # (those never reach here, so they don't count), so the
+                            # walk ran the ENTIRE candidate list probing live —
+                            # 30-50s of spinning for a source already in hand.
+                            if sub_scans >= 3 or hunt_elapsed >= sub_hunt_budget:
+                                log_service.info(
+                                    f"Subtitle hunt stopped for {state_key} "
+                                    f"(scans={sub_scans}, elapsed="
+                                    f"{hunt_elapsed:.1f}s/{sub_hunt_budget}s); "
+                                    f"serving best-quality playable source."
                                 )
-                                # Hold the best-quality sub-less source and keep
-                                # scanning; a lower-res subbed source can never
-                                # displace it.
-                                if held_no_sub_url is None or cand_rank > held_no_sub_rank:
-                                    held_no_sub_url = resolved
-                                    held_no_sub_rank = cand_rank
-                                sub_scans += 1
-                                if sub_scans >= 3:
-                                    log_service.info(
-                                        f"Subtitle hunt capped at 3 scans for "
-                                        f"{state_key}; serving best-quality "
-                                        f"playable source (external subs)."
-                                    )
-                                    final_url = held_no_sub_url
-                                    break
-                                # Keep looking for a subtitled candidate.
-                                continue
+                                final_url = held_no_sub_url
+                                break
+                            # Keep looking for a subtitled candidate.
+                            continue
 
                     # Correct episode (or movie/unknown), playable, and either
                     # subtitle-satisfied or subtitles not required — accept this
