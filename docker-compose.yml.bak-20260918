@@ -4,8 +4,6 @@ services:
     container_name: jfresolve
     restart: unless-stopped
     network_mode: host
-    environment:
-      - TZ=Australia/Brisbane
     volumes:
       - /opt/jfresolve-data:/data
       - /share/jellyfin/library:/share/jellyfin/library
