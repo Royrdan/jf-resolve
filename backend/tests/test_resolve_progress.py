@@ -83,7 +83,15 @@ def test_finish_records_failure_reason(rp):
 
     snap = rp.get("k")
     assert snap["state"] == "failed"
+    assert snap["phase"] == "failed"
     assert "cam-tier" in snap["message"]
+
+
+def test_finish_clears_the_mid_flight_phase(rp):
+    """Left as phase='walk', a completed entry misreports what happened."""
+    rp.publish("k", "walk", "Checking source 2 of 9")
+    rp.finish("k", True, "Source found — starting playback")
+    assert rp.get("k")["phase"] == "done"
 
 
 def test_finish_without_begin_still_records(rp):

@@ -126,6 +126,9 @@ def finish(key: str, ok: bool, message: str, **detail) -> None:
             entry = {"key": key, "started": now, "phase": "done" if ok else "failed"}
             _BOARD[key] = entry
         entry["state"] = "done" if ok else "failed"
+        # Terminal phase too, not just terminal state — an entry left reading
+        # phase="walk" after the walk succeeded is a lie to anyone reading it.
+        entry["phase"] = "done" if ok else "failed"
         entry["message"] = message
         if detail:
             entry["detail"] = dict(detail)
