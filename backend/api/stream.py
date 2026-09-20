@@ -378,6 +378,13 @@ async def resolve_stream(
     # cannot rewind the leader's phase back to the start.
     resolve_progress.begin(cache_key, "Getting ready…")
 
+    # Start of the wall clock the player actually experiences. Used by the walk
+    # budget below, which has to measure the WHOLE resolve — library lookup +
+    # catalogue query + parallel pre-flight + serial walk. Timing only the serial
+    # walk would miss most of the wait (Encanto: 26 of its 41s were spent before
+    # the walk even started).
+    resolve_started = time.monotonic()
+
     if media_type not in ["movie", "tv"]:
         raise HTTPException(status_code=400, detail="Invalid media type")
 
@@ -1220,10 +1227,48 @@ async def resolve_stream(
 
             # Wall-clock budget for the subtitle hunt (see the gate below).
             sub_hunt_budget = await settings.get("subtitle_hunt_budget_seconds", 10)
+            # Wall-clock budget for the whole resolve, enforced at the top of the
+            # walk loop. Separate from the subtitle hunt above, which only bounds
+            # the scan for a better-subtitled source once something playable is
+            # already held.
+            resolve_budget = await settings.get("resolve_budget_seconds", 20)
             walk_started = time.monotonic()
 
             for retry in range(MAX_EPISODE_RETRIES + 1):
                 if retry > 0:
+                    # Hard cap on the walk. A title with no fully-acceptable
+                    # source (every candidate a foreign dub / DV-without-fallback
+                    # / TrueHD-default) otherwise probes the ENTIRE candidate list
+                    # live at ~3-4s each, only to end up serving a source it
+                    # already held seconds in — Encanto burned 33s to re-serve the
+                    # library hit it had at 8s.
+                    #
+                    # Gated on actually HOLDING something servable, so the cap can
+                    # never convert a slow play into a failed one: with nothing in
+                    # hand the walk runs to exhaustion exactly as before.
+                    resolve_elapsed = time.monotonic() - resolve_started
+                    have_fallback = (
+                        held_no_sub_url is not None
+                        or held_dts_default_url is not None
+                        or direct_fallback_url is not None
+                    )
+                    if have_fallback and resolve_elapsed >= resolve_budget:
+                        log_service.info(
+                            f"Resolve budget reached for {state_key} "
+                            f"({resolve_elapsed:.1f}s/{resolve_budget}s after "
+                            f"{retry} walked candidate(s)) — serving the best "
+                            f"source held so far instead of probing the rest."
+                        )
+                        resolve_progress.publish(
+                            cache_key,
+                            "walk",
+                            "No perfect match — going with the best source "
+                            "found so far…",
+                            index=retry_index + 1,
+                            total=len(candidates),
+                            elapsed_s=round(resolve_elapsed, 1),
+                        )
+                        break
                     retry_index += 1
                     if retry_index >= len(candidates):
                         log_service.warning(
