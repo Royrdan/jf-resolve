@@ -24,6 +24,7 @@ from ..services.rd_service import (
     RD_BLOCKED_RELEASE_TAGS,
     rd_filename_blocked,
 )
+from ..services import resolve_progress
 from ..services.torbox_service import TorBoxService
 from ..services.settings_manager import SettingsManager
 from ..services.stream_validator import (
@@ -176,6 +177,93 @@ def _parse_stream_ref(url: str):
     return infohash, None, name, False
 
 
+def _resolve_cache_key(media_type, tmdb_id, season, episode, quality, index) -> str:
+    """The identity of a resolve. Built in exactly ONE place.
+
+    `/resolve` and `/progress` must agree on this string or the loading page
+    silently watches the wrong resolve, so neither route formats it inline.
+    """
+    return f"{media_type}:{tmdb_id}:{season}:{episode}:{quality}:{index}"
+
+
+def _media_label(media_type, media_title, tmdb_id, season, episode) -> str:
+    """Human name for on-screen status text, e.g. `PAW Patrol S01E05`."""
+    title = media_title or f"{media_type} {tmdb_id}"
+    if media_type == "tv" and season is not None and episode is not None:
+        return f"{title} S{season:02d}E{episode:02d}"
+    return title
+
+
+def _pretty_provider(provider: str) -> str:
+    return {"torbox": "TorBox", "rd": "Real-Debrid"}.get(provider, provider)
+
+
+def _short_source_name(name: str, limit: int = 46) -> str:
+    """Trim a release filename down to something readable on a TV."""
+    if not name:
+        return ""
+    base = name.rsplit("/", 1)[-1]
+    for ext in (".mkv", ".mp4", ".avi", ".m4v"):
+        if base.lower().endswith(ext):
+            base = base[: -len(ext)]
+            break
+    base = base.replace(".", " ").replace("_", " ").strip()
+    return base if len(base) <= limit else base[: limit - 1].rstrip() + "…"
+
+
+@router.get("/progress/{media_type}/{tmdb_id}")
+async def resolve_progress_status(
+    media_type: str,
+    tmdb_id: int,
+    quality: str = Query("1080p"),
+    season: Optional[int] = Query(None),
+    episode: Optional[int] = Query(None),
+    index: int = Query(0),
+    imdb_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Live phase of the resolve for this exact item, for the player's loading page.
+
+    Deliberately mirrors `/resolve/{media_type}/{tmdb_id}` in path shape and
+    query params, so a client turns one URL into the other by replacing
+    `/resolve/` with `/progress/` — no re-deriving parameters, therefore no way
+    for the two sides to disagree about which resolve is being watched.
+    `imdb_id` is accepted and ignored for exactly that reason.
+
+    Never 404s on an unknown item: a 404 is indistinguishable from "this server
+    is too old to have this endpoint", and the client must be able to tell those
+    apart to decide whether to fall back to its own timer-driven text.
+    """
+    settings = SettingsManager(db)
+    await settings.load_cache()
+    if not await settings.get("resolve_progress_enabled", True):
+        return {"state": "disabled"}
+
+    cache_key = _resolve_cache_key(
+        media_type, tmdb_id, season, episode, quality, index
+    )
+    snapshot = resolve_progress.get(cache_key)
+    if snapshot is not None:
+        return snapshot
+
+    # No live entry. A warm resolve cache means the answer is already sitting
+    # there and playback is about to start, which is worth saying out loud.
+    if cache_key in RESOLVE_CACHE:
+        ts, _url = RESOLVE_CACHE[cache_key]
+        if time.time() - ts < RESOLVE_CACHE_TTL:
+            return {
+                "state": "done",
+                "phase": "cached",
+                "message": "Ready — starting playback",
+                "detail": {},
+                "elapsed_ms": 0,
+                "updated_ms_ago": 0,
+            }
+
+    return {"state": "idle"}
+
+
 @router.get("/providers")
 async def provider_health(
     db: AsyncSession = Depends(get_db),
@@ -273,12 +361,22 @@ async def resolve_stream(
     )
 
     # Check cache for resolved URL
-    cache_key = f"{media_type}:{tmdb_id}:{season}:{episode}:{quality}:{index}"
+    cache_key = _resolve_cache_key(
+        media_type, tmdb_id, season, episode, quality, index
+    )
     if cache_key in RESOLVE_CACHE:
         ts, cached_url = RESOLVE_CACHE[cache_key]
         if time.time() - ts < RESOLVE_CACHE_TTL:
             log_service.info(f"Using cached resolved URL for {cache_key}")
+            resolve_progress.finish(
+                cache_key, True, "Ready — starting playback", cached=True
+            )
             return RedirectResponse(url=cached_url, status_code=302)
+
+    # Narrate this resolve for the player's loading page (see resolve_progress).
+    # `begin` yields to an already-active entry, so the coalesced waiter below
+    # cannot rewind the leader's phase back to the start.
+    resolve_progress.begin(cache_key, "Getting ready…")
 
     if media_type not in ["movie", "tv"]:
         raise HTTPException(status_code=400, detail="Invalid media type")
@@ -344,6 +442,9 @@ async def resolve_stream(
                 log_service.info(
                     f"Coalesced resolve for {cache_key} — serving leader's cached URL"
                 )
+                resolve_progress.finish(
+                    cache_key, True, "Ready — starting playback", cached=True
+                )
                 return RedirectResponse(url=cached_url, status_code=302)
 
         if media_type == "movie":
@@ -372,6 +473,8 @@ async def resolve_stream(
             use_index = state.current_index
 
         await failover.update_state(state)
+
+        resolve_progress.publish(cache_key, "lookup", "Looking up this title…")
 
         if not imdb_id:
             if not api_key:
@@ -412,6 +515,9 @@ async def resolve_stream(
                 log_service.error(
                     f"Failed to fetch TMDB metadata for {media_type}/{tmdb_id}: {e}"
                 )
+
+        # Human name for every status line from here on.
+        label = _media_label(media_type, media_title, tmdb_id, season, episode)
 
         # --- Debrid provider selection (TorBox primary, RD fallback) ---
         # One setting swaps the whole direct-resolve path between providers.
@@ -534,6 +640,12 @@ async def resolve_stream(
         # walk finds no decodable-default source (see the fallback chain below).
         direct_fallback_url = None
         if rd_api_key_val and rd_direct_enabled:
+            resolve_progress.publish(
+                cache_key,
+                "library",
+                f"Checking your {_pretty_provider(debrid_provider)} library for {label}…",
+                provider=debrid_provider,
+            )
             rd_target_quality = quality
             rd_strict_quality = bool(quality and quality.lower() != "auto")
             if not quality or quality == "auto":
@@ -562,6 +674,12 @@ async def resolve_stream(
                     # path bypasses the Stremio validation loop below. A foreign
                     # dub is rejected → fall through to the Stremio addons.
                     if rd_url and validator is not None:
+                        resolve_progress.publish(
+                            cache_key,
+                            "library",
+                            "Found a copy in your library — checking it plays…",
+                            provider=debrid_provider,
+                        )
                         rd_probe = await validator.validate(rd_url)
                         if not rd_probe.ok:
                             log_service.info(
@@ -600,10 +718,21 @@ async def resolve_stream(
                             f"→ {rd_url[:100]}..."
                         )
                         RESOLVE_CACHE[cache_key] = (time.time(), rd_url)
+                        resolve_progress.finish(
+                            cache_key,
+                            True,
+                            "Playing your library copy — starting playback",
+                            source="library",
+                        )
                         return RedirectResponse(url=rd_url, status_code=302)
                     else:
                         log_service.info(
                             f"{debrid_provider} direct: no match for {state_key}, falling back to Stremio addons"
+                        )
+                        resolve_progress.publish(
+                            cache_key,
+                            "library",
+                            "Nothing usable in your library — searching for sources…",
                         )
                 else:
                     log_service.info(
@@ -624,6 +753,9 @@ async def resolve_stream(
         # matching is off). Results are infohash-only and get resolved through
         # the same cached-only TorBox path as any torrent-mode candidate.
         if zilean_enabled and zilean_url:
+            resolve_progress.publish(
+                cache_key, "search", f"Searching Zilean for {label}…"
+            )
             try:
                 zilean = ZileanService(zilean_url)
                 if media_title:
@@ -637,6 +769,12 @@ async def resolve_stream(
                         log_service.info(
                             f"Zilean: {len(streams)} candidate(s) for {state_key} "
                             f"('{media_title}')"
+                        )
+                        resolve_progress.publish(
+                            cache_key,
+                            "search",
+                            f"Zilean found {len(streams)} source(s)",
+                            found=len(streams),
                         )
                     else:
                         log_service.info(
@@ -658,6 +796,9 @@ async def resolve_stream(
         for manifest_url in (manifest_urls if not streams else []):
             try:
                 log_service.info(f"Attempting to fetch streams from: {manifest_url}")
+                resolve_progress.publish(
+                    cache_key, "search", "Searching add-ons for sources…"
+                )
                 stremio = StremioService(manifest_url)
 
                 if media_type == "movie":
@@ -804,6 +945,15 @@ async def resolve_stream(
         # pass (below) can read the seeder count / quality for a given ref.
         url_to_stream = {s["url"]: s for s in streams if s.get("url")}
 
+        if candidates:
+            resolve_progress.publish(
+                cache_key,
+                "rank",
+                f"{len(streams)} source(s) found, {len(candidates)} worth trying",
+                found=len(streams),
+                candidates=len(candidates),
+            )
+
         if not candidates:
             log_service.error(
                 f"Stream selection failed for {state_key}. Quality requested: {target_quality}, "
@@ -851,6 +1001,14 @@ async def resolve_stream(
                             f"TorBox cache pre-scan for {state_key}: "
                             f"{len(cached_set)}/{len(to_check)} candidate(s) "
                             f"cached — leading walk with cached sources."
+                        )
+                        resolve_progress.publish(
+                            cache_key,
+                            "rank",
+                            f"{len(cached_set)} of {len(to_check)} source(s) "
+                            f"already cached — trying those first",
+                            cached=len(cached_set),
+                            checked=len(to_check),
                         )
                     else:
                         log_service.info(
@@ -961,6 +1119,14 @@ async def resolve_stream(
                 pf_targets = candidates[:pf_n]
                 pf_sem = asyncio.Semaphore(max(1, pf_conc))
                 pf_winner = asyncio.Event()
+                resolve_progress.publish(
+                    cache_key,
+                    "preflight",
+                    f"Testing the best {min(len(pf_targets), pf_conc)} source(s) "
+                    f"at once…",
+                    targets=len(pf_targets),
+                    concurrency=pf_conc,
+                )
 
                 async def _preflight(cand_url):
                     async with pf_sem:
@@ -1042,6 +1208,15 @@ async def resolve_stream(
                     f"{'playable source found' if pf_winner.is_set() else 'no winner yet'}"
                     f" — serial walk consumes the cache."
                 )
+                resolve_progress.publish(
+                    cache_key,
+                    "preflight",
+                    "Found a good source — checking it over"
+                    if pf_winner.is_set()
+                    else f"Tested {len(preflight_probe)} source(s), none ideal yet",
+                    warmed=len(preflight_probe),
+                    winner=pf_winner.is_set(),
+                )
 
             # Wall-clock budget for the subtitle hunt (see the gate below).
             sub_hunt_budget = await settings.get("subtitle_hunt_budget_seconds", 10)
@@ -1071,6 +1246,16 @@ async def resolve_stream(
                     play_url = retry_stream_url
                     infohash, _file_idx, fname, is_torrent_mode = _parse_stream_ref(
                         retry_stream_url
+                    )
+                    short_name = _short_source_name(fname or "")
+                    resolve_progress.publish(
+                        cache_key,
+                        "walk",
+                        f"Checking source {retry_index + 1} of {len(candidates)}"
+                        + (f" — {short_name}" if short_name else "…"),
+                        index=retry_index + 1,
+                        total=len(candidates),
+                        source=short_name,
                     )
                     if infohash and rd_converter is not None:
                         # Skip release tags RD's filter-gate will 451 anyway —
@@ -1294,6 +1479,13 @@ async def resolve_stream(
                             ):
                                 held_dts_default_url = resolved
                                 held_dts_default_rank = dd_rank
+                            resolve_progress.publish(
+                                cache_key,
+                                "walk",
+                                f"Source {retry_index + 1} would play silently — "
+                                f"looking for one with better audio…",
+                                index=retry_index + 1,
+                            )
                             log_service.info(
                                 f"Deferred DTS/TrueHD-default source for {state_key} "
                                 f"(a={probe.audio_codec}) — default audio not "
@@ -1323,6 +1515,14 @@ async def resolve_stream(
                                 held_no_sub_rank = cand_rank
                             sub_scans += 1
                             hunt_elapsed = time.monotonic() - walk_started
+                            resolve_progress.publish(
+                                cache_key,
+                                "subs",
+                                "Playable source found — looking for one with "
+                                "subtitles…",
+                                scans=sub_scans,
+                                elapsed_s=round(hunt_elapsed, 1),
+                            )
                             # Bound the hunt by BOTH playable scans and wall clock.
                             # The scan counter alone could never fire on a title
                             # whose other candidates are foreign dubs / dead links
@@ -1434,6 +1634,13 @@ async def resolve_stream(
                         f"({(cname or '')[:50]}, 👤{seeders or '?'}) onto TorBox, "
                         f"waiting ≤{remaining:.0f}s for {state_key}."
                     )
+                    resolve_progress.publish(
+                        cache_key,
+                        "load",
+                        f"No ready-to-play copy — downloading one now "
+                        f"(up to {remaining:.0f}s)…",
+                        wait_seconds=round(remaining),
+                    )
                     loaded = await rd_converter.load_and_wait(
                         ih, season, episode,
                         filename_hint=cname,
@@ -1458,6 +1665,7 @@ async def resolve_stream(
 
         if final_url:
             RESOLVE_CACHE[cache_key] = (time.time(), final_url)
+            resolve_progress.finish(cache_key, True, "Source found — starting playback")
         elif uncached_attempted:
             # We queued an uncached download but it wasn't ready inside the wait
             # window (it keeps downloading server-side). Serving the not-cached
@@ -1493,6 +1701,9 @@ async def resolve_stream(
             state.current_index = retry_index + 1
             state.attempt_count += 1
             await failover.update_state(state)
+            resolve_progress.finish(
+                cache_key, True, "Serving best available source — starting playback"
+            )
         else:
             # Torrent-mode: nothing cached and playable across all candidates.
             log_service.warning(
@@ -1505,10 +1716,19 @@ async def resolve_stream(
 
         return RedirectResponse(url=final_url, status_code=302)
 
-    except HTTPException:
+    except HTTPException as e:
+        # Single place that closes the progress entry out as failed — every
+        # "no playable source" path in this function raises, so the loading page
+        # gets the real reason instead of the app's generic wording.
+        resolve_progress.finish(
+            cache_key, False, str(e.detail) or "No playable source found"
+        )
         raise
     except Exception as e:
         log_service.error(f"Stream resolution error: {e}")
+        resolve_progress.finish(
+            cache_key, False, "Something went wrong finding a source"
+        )
         raise HTTPException(
             status_code=500, detail=f"Failed to resolve stream: {str(e)}"
         )
