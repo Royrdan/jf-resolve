@@ -51,27 +51,46 @@ def _is_deprioritised_stream(stream: Dict) -> bool:
 # All tiers are plain constants — tune them here.
 
 # Audio-language likelihood from the release name (fallback when the source
-# provides no structured `languages` list). English markers are checked before
-# foreign ones so a subbed/original release that also says FRENCH still ranks English.
+# provides no structured `languages` list). English and foreign markers are both
+# evaluated and COMBINED (see _language_rank) — testing English first was a bug:
+# `\beng\b` matches inside "iTA-ENG" / "NORDiC ENG" / "[UKR_ENG]", so an
+# explicitly dual-audio release scored as clean English, the best possible rank.
 _ENGLISH_AUDIO_MARKER = re.compile(
     r"\b(vostfr|vostang|eng|english|en[\s._-]?subs?|subbed)\b",
     re.IGNORECASE,
 )
 # MULTi / Dual-Audio: English IS present, but so is a foreign track — and the
 # foreign one is often flagged default (the French-default "multi" Family Guy
-# that played 2026-08-29). Ranked BELOW clean English so an English-only source
-# probes first; the ffprobe default-track gate is the hard backstop.
+# that played 2026-08-29). Ranked BELOW an unmarked release so a plain
+# single-language source probes first; the ffprobe default-track gate is the
+# hard backstop.
 _MULTI_AUDIO_MARKER = re.compile(
     r"\b(multi|dual[\s._-]?audio|dualaudio)\b",
     re.IGNORECASE,
 )
+# NOTE: match this against _lang_text(), not the raw name — "UKR_ENG" is a
+# SINGLE word token to the regex engine (underscore is a word character), so
+# neither \bUKR\b nor \bENG\b fires on it.
 _FOREIGN_AUDIO_MARKER = re.compile(
     r"\b(french|truefrench|vff|vfq|vfi|vof|german|deutsch|italian|ita|"
     r"spanish|espanol|castellano|latino|dublado|dubbed|dublat|pldub|lektor|"
     r"russian|rus|hindi|tamil|telugu|korean|polish|czech|hungarian|"
-    r"swedish|danish|greek|turkish|dubbing|dublaj|multidub|rusdub|itadub)\b",
+    r"swedish|danish|greek|turkish|dubbing|dublaj|multidub|rusdub|itadub|"
+    # Added 2026-09-20 from the real rejection log: Ukrainian (the "Hurtom"
+    # release group) and Nordic multi-packs were producing foreign-default-audio
+    # rejections while scoring as UNMARKED, because no marker here matched them.
+    r"ukr|ukrainian|ukrdub|nordic|nordisk|swesub|norwegian|finnish|"
+    r"dutch|portuguese|brazilian|arabic|thai|vietnamese|japanese|jpn|"
+    r"chinese|mandarin|cantonese|romanian|bulgarian|serbian|croatian|slovak)\b",
     re.IGNORECASE,
 )
+
+
+def _lang_text(stream: Dict) -> str:
+    """Release name prepared for language-marker matching: underscores become
+    separators so bracketed tags like "[UKR_ENG]" / "[EN_FR]" tokenise into
+    their individual language codes instead of one opaque word."""
+    return f"{stream.get('title', '')} {stream.get('name', '')}".replace("_", " ")
 # Editions that look broken on ordinary players (3D side-by-side / top-bottom).
 # Not discarded — just sent to the back of their quality bucket.
 _BAD_EDITION_MARKER = re.compile(
@@ -216,33 +235,48 @@ def _size_tier(stream: Dict) -> int:
 
 
 def _language_rank(stream: Dict) -> int:
-    """3 = English-only audio, 2 = multi/dual (English + foreign track),
-    1 = unmarked (English original by default), 0 = foreign-dub only. Trusts the
-    source's structured `languages` list first (Zilean), then falls back to
-    reading the release name. Multi sits below clean English because its foreign
-    track is often flagged default and would auto-play (the ffprobe default-track
-    gate is the hard backstop; this just probes the safer source first)."""
+    """3 = English-only audio, 2 = UNMARKED (single-language, English original by
+    default), 1 = multi/dual (English + a foreign track), 0 = foreign-dub only.
+
+    UNMARKED OUTRANKS MULTI, which is the opposite of the original scale. Measured
+    2026-09-20 against live Zilean data: a "clean English" source barely exists in
+    the index (Encanto 0/127, Toy Story 4 0/138, Inside Out 2 0/200 carry an
+    English-only language list), so ranking multi second put dual-audio releases at
+    the very top of every walk — and those are precisely the ones whose foreign
+    track is flagged default. The walk only probes ~9 of 100-200 candidates, so the
+    79-112 unmarked plain-English releases below them were never reached. Ground
+    truth over 20 titles (ffprobe, not name-guessing): first servable source moved
+    from probe #6/#7/never to #0/#1, 13 titles better, 0 worse.
+
+    Trusts the source's structured `languages` list first (Zilean), then falls back
+    to reading the release name.
+    """
     langs = stream.get("languages") or []
     if langs:
         norm = {str(l).strip().lower()[:2] for l in langs}
         has_en = "en" in norm
         has_foreign = bool(norm - {"en", ""})
         if has_en and has_foreign:
-            return 2
+            return 1
         return 3 if has_en else 0
     # No structured language list. Zilean's `dubbed` boolean still flags many
     # foreign dubs whose release name is otherwise unmarked (the untagged-Russian
     # case that stalled KPop Demon Hunters 2026-08-31) — trust it and de-rank.
     if stream.get("dubbed"):
         return 0
-    text = f"{stream.get('title', '')} {stream.get('name', '')}"
-    if _MULTI_AUDIO_MARKER.search(text):
-        return 2
-    if _ENGLISH_AUDIO_MARKER.search(text):
-        return 3
-    if _FOREIGN_AUDIO_MARKER.search(text):
+    text = _lang_text(stream)
+    # Evaluate BOTH marker sets before deciding. Testing English first let
+    # `\beng\b` inside "iTA-ENG" / "[UKR_ENG]" / "NORDiC ENG" score a dual-audio
+    # release as clean English — the top rank, for the worst kind of candidate.
+    has_en = bool(_ENGLISH_AUDIO_MARKER.search(text))
+    has_foreign = bool(_FOREIGN_AUDIO_MARKER.search(text))
+    if _MULTI_AUDIO_MARKER.search(text) or (has_en and has_foreign):
+        return 1
+    if has_foreign:
         return 0
-    return 1
+    if has_en:
+        return 3
+    return 2
 
 
 class StremioService:
@@ -717,13 +751,24 @@ class StremioService:
         Precedence, most significant first:
           1. English audio likely       (only when english_first)
           2. Episode-specific > pack     (TV correctness)
-          3. Not a 3D/SBS edition        (broken-looking on normal players)
-          4. Container   mkv>mp4>...     (best embedded subs / multi-audio)
-          5. Source tier remux>web-dl>.. (better encode at same resolution)
-          6. Size        bigger≈better bitrate (real 2160p > tiny AI upscale)
-          7. Codec       h265/h264>xvid
-          8. Audio       atmos>ddp>ac3>aac
+          3. Audio       ddp>ac3>aac>...>dts/truehd  (PLAYABILITY, not quality)
+          4. Not a 3D/SBS edition        (broken-looking on normal players)
+          5. Container   mkv>mp4>...     (best embedded subs / multi-audio)
+          6. Source tier remux>web-dl>.. (better encode at same resolution)
+          7. Size        bigger≈better bitrate (real 2160p > tiny AI upscale)
+          8. Codec       h265/h264>xvid
           9. Subtitle hint in the name   (weak; real subs handled post-probe)
+
+        Audio sits at 3, not at 8. Undecodable default audio (DTS/TrueHD) is the
+        second most common rejection after foreign default audio, so it belongs
+        with the playability signals, not with the nice-to-have quality tiers —
+        there is no point probing a gorgeous remux the player cannot play. It
+        stays BELOW episode-specificity on purpose: promoting it above (tested
+        2026-09-20) dragged season packs ahead of the actual episode file on 14
+        of 20 TV episodes (95 packs in the top 9, vs 68 with this order), for no
+        gain — the two orders found the identical first servable source on every
+        title measured, and are provably identical for movies (episode-specific
+        is constant 0 when season/episode are None).
 
         Source/codec/audio each take max(release-name score, Zilean structured
         field score); size uses the structured `sizeBytes`. REORDER ONLY —
@@ -743,12 +788,12 @@ class StremioService:
         return (
             lang,
             ep_specific,
+            _merged_tier(text, _AUDIO_TIERS, _audio_field_score(stream), 2),
             edition_ok,
             _tier_score(text, _CONTAINER_TIERS, 2),
             _merged_tier(text, _SOURCE_TIERS, _quality_field_score(stream), 2),
             _size_tier(stream),
             _merged_tier(text, _CODEC_TIERS, _codec_field_score(stream), 2),
-            _merged_tier(text, _AUDIO_TIERS, _audio_field_score(stream), 2),
             1 if _SUBTITLE_HINT_MARKER.search(text) else 0,
         )
 
@@ -797,10 +842,11 @@ class StremioService:
         primary = [s for s in streams if not _is_deprioritised_stream(s)]
         deprioritised = [s for s in streams if _is_deprioritised_stream(s)]
 
-        # Stable composite sort within each resolution bucket: English-audio
-        # first, then episode-specificity, then file-quality tiers (container /
-        # source / codec / audio) and edition sanity. Python's sort is stable,
-        # so equal-key candidates keep the indexer's original order.
+        # Stable composite sort within each resolution bucket: likely-English
+        # audio first, then episode-specificity, then decodable audio, then the
+        # file-quality tiers (edition / container / source / size / codec).
+        # Python's sort is stable, so equal-key candidates keep the indexer's
+        # original order.
         def _bucket_sorted(items: List[Dict]) -> List[Dict]:
             return sorted(
                 items,

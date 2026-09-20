@@ -146,5 +146,86 @@ def test_ddp_atmos_still_ranks_high():
     assert S._tier_score("Film 2160p WEB-DL DDP5 1 Atmos", S._AUDIO_TIERS, 2) == 4
 
 
+# ── 2026-09-20: the language scale was INVERTED ─────────────────────────────
+# Measured against live Zilean data: an English-only language list barely exists
+# (Encanto 0/127, Toy Story 4 0/138, Inside Out 2 0/200), so ranking multi/dual
+# second put foreign-default-audio releases at the head of every walk while the
+# 79-112 unmarked plain-English ones sat below the ~9-candidate probe budget.
+# Ground truth over 20 titles (real ffprobe): 13 better, 6 unchanged, 0 worse.
+
+def test_unmarked_outranks_dual_audio():
+    """THE fix. An unmarked release probes BEFORE a dual-audio one — the latter's
+    foreign track is often the default and gets hard-rejected at validation."""
+    dual = _cand(30, "Film 2021 iTA-ENG Bluray 2160p HDR x265-CYBER mkv",
+                 quality="bluray", codec="hevc", langs=["en", "it"],
+                 size=14_000_000_000)
+    plain = _cand(31, "Film 2021 1080p BluRay DD+7 1 x264-TayTO mkv",
+                  quality="bluray", codec="avc", size=8_000_000_000)
+    assert S._language_rank(plain) > S._language_rank(dual)
+    inst = S.StremioService.__new__(S.StremioService)
+    order = inst.ordered_candidates([dual, plain], "4k", fallback_enabled=True)
+    assert order[0] == "hash31"
+
+
+def test_eng_inside_dual_audio_tag_is_not_clean_english():
+    """`\\beng\\b` matches inside 'iTA-ENG' / '[UKR_ENG]' / 'NORDiC ENG'. Testing
+    the English marker before the foreign one scored those as clean English —
+    the TOP rank, for exactly the candidates that fail validation."""
+    for name in ("Film 2021 iTA-ENG Bluray 2160p x265-CYBER mkv",
+                 "Film (2021) UHD-BDRip 1080p H 265 HDR [UKR_ENG] [Hurtom] mkv",
+                 "Film 2021 NORDiC ENG 1080p REMUX BluRay AVC mkv"):
+        c = _cand(40, name)  # no structured languages → name-only path
+        assert S._language_rank(c) == 1, name
+    # A genuinely English-only name still earns the top rank.
+    assert S._language_rank(_cand(41, "Film 2021 1080p BluRay ENG x264")) == 3
+    # Foreign-only still floors.
+    assert S._language_rank(_cand(42, "Film 2021 TRUEFRENCH 1080p x264")) == 0
+    # No language signal at all → unmarked, above dual-audio but below clean ENG.
+    assert S._language_rank(_cand(43, "Film 2021 1080p WEB-DL DDP5 1-EVO")) == 2
+
+
+def test_undecodable_audio_outranks_quality_tiers():
+    """Audio playability beats source/size. A TrueHD-only remux is unplayable on
+    this player, so a humble DDP web-dl must probe first despite a worse tier."""
+    remux = _cand(50, "Film 2021 2160p UHD BluRay REMUX HEVC TrueHD 7 1 Atmos",
+                  quality="remux", codec="hevc", audio=["TrueHD"],
+                  size=60_000_000_000)
+    webdl = _cand(51, "Film 2021 1080p WEB-DL DDP5 1 H 264-EVO mkv",
+                  quality="web-dl", codec="avc",
+                  audio=["Dolby Digital Plus"], size=5_000_000_000)
+    inst = S.StremioService.__new__(S.StremioService)
+    order = inst.ordered_candidates([remux, webdl], "4k", fallback_enabled=True)
+    assert order[0] == "hash51"
+
+
+def test_episode_specificity_still_outranks_audio():
+    """TV-safety guarantee. Audio was deliberately NOT promoted above episode
+    matching: doing so pulled season packs ahead of the real episode file on 14
+    of 20 TV episodes for zero gain. The episode-specific file leads even when a
+    season pack carries better audio."""
+    pack = _cand(60, "Show S03 COMPLETE 1080p WEB-DL DDP5 1 Atmos H 264-NTb",
+                 quality="web-dl", codec="avc", audio=["Atmos", "Dolby Digital Plus"],
+                 size=40_000_000_000)
+    ep = _cand(61, "Show S03E07 1080p WEB-DL AAC2 0 H 264-GRP",
+               quality="web-dl", codec="avc", audio=["AAC"], size=2_000_000_000)
+    inst = S.StremioService.__new__(S.StremioService)
+    order = inst.ordered_candidates([pack, ep], "1080p", fallback_enabled=True,
+                                    season=3, episode=7)
+    assert order[0] == "hash61"
+
+
+def test_reorder_only_contract_holds_for_new_key():
+    """Nothing above may DROP a candidate — the validator is the only gate."""
+    cands = [
+        _cand(70, "Film 2021 iTA-ENG 2160p x265", langs=["en", "it"]),
+        _cand(71, "Film 2021 TRUEFRENCH 1080p x264"),
+        _cand(72, "Film 2021 1080p WEB-DL DDP5 1-EVO"),
+        _cand(73, "Film 2021 2160p REMUX TrueHD Atmos", audio=["TrueHD"]),
+    ]
+    inst = S.StremioService.__new__(S.StremioService)
+    order = inst.ordered_candidates(cands, "4k", fallback_enabled=True)
+    assert sorted(order) == sorted(c["url"] for c in cands)
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
