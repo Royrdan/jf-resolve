@@ -990,13 +990,16 @@ async def resolve_stream(
                                 except Exception:
                                     # Let the walk do its GET-fallback + probe.
                                     return
-                            if validator is not None:
-                                probe = await validator.validate(resolved)
+                            if walk_validator is not None:
+                                probe = await walk_validator.validate(resolved)
                                 preflight_probe[resolved] = probe
-                                # First fully-acceptable source (playable, English
-                                # default audio, and a decodable audio track) — the
-                                # walk will serve this; stop digging.
-                                if probe.ok and probe.has_decodable_audio:
+                                # Stop digging ONLY for a source the walk would
+                                # actually serve. Testing less than the walk does
+                                # (e.g. ignoring the subtitle preference) cancels
+                                # the other probes for a source that is about to be
+                                # deferred, forcing the walk back into a live
+                                # serial crawl — worse than no pre-flight at all.
+                                if _is_fully_acceptable(probe):
                                     pf_winner.set()
                         except Exception as e:
                             log_service.info(
