@@ -36,6 +36,7 @@ from ..services.stream_validator import (
 )
 from ..services.stremio_service import StremioService, CAM_PATTERN
 from ..services.tmdb_service import TMDBService
+from ..services import tracker_scrape
 from ..services.zilean_service import ZileanService
 
 router = APIRouter(prefix="/api/stream", tags=["stream"])
@@ -1640,10 +1641,40 @@ async def resolve_stream(
             min_seeders = await settings.get("uncached_min_seeders", 1)
             wait_budget = await settings.get("uncached_load_wait_seconds", 20)
 
-            # Rank the uncached candidates by (quality, seeders). Explicit
+            # Live seeder counts for the whole candidate list in one batched UDP
+            # scrape (~1s regardless of list size). Without it every Zilean row
+            # reports "unknown" — DMM hashlists carry no seeder data at all —
+            # so the min-seeders gate below could never fire, and a 0-seed
+            # magnet got queued and burned the entire wait budget on EVERY
+            # retry (TorBox reports plain "downloading" for minutes before
+            # admitting "stalled (no seeds)"). Best-effort: if no tracker
+            # answers, every hash stays unknown and behaviour is exactly as it
+            # was before this scrape existed.
+            scraped: dict = {}
+            if await settings.get("tracker_scrape_enabled", True):
+                scraped = await tracker_scrape.scrape_seeders(
+                    [
+                        ih
+                        for ih, _f, _c, _t in (
+                            _parse_stream_ref(u) for u in candidates
+                        )
+                        if ih
+                    ],
+                    await settings.get(
+                        "tracker_scrape_trackers", tracker_scrape.DEFAULT_TRACKERS
+                    ),
+                    float(
+                        await settings.get(
+                            "tracker_scrape_timeout_seconds",
+                            tracker_scrape.DEFAULT_TIMEOUT_SECONDS,
+                        )
+                    ),
+                )
+
+            # Rank the uncached candidates by (seeders, quality). Explicit
             # 0-seed torrents can never finish downloading, so drop them;
-            # unknown-seeder rows (Zilean) are allowed — TorBox's stall
-            # detection abandons a genuinely dead magnet quickly.
+            # unknown-seeder rows (no tracker answered) are still allowed —
+            # TorBox's stall detection remains the backstop for those.
             ranked = []
             seen_hashes = set()
             for cand_url in candidates:
@@ -1652,12 +1683,21 @@ async def resolve_stream(
                     continue
                 seen_hashes.add(ih)
                 src = url_to_stream.get(cand_url, {})
-                seeders = _stream_seeders(src)
+                # A live scrape beats the addon's self-reported figure, which is
+                # stale at best and a hardcoded 999 in Zilean's Torznab output.
+                seeders = scraped.get(ih)
+                if seeders is None:
+                    seeders = _stream_seeders(src)
                 if seeders is not None and seeders < min_seeders:
                     continue
                 rank = _QUALITY_RANK.get(stremio.detect_quality(src), 1)
                 ranked.append((rank, seeders or 0, ih, cname))
-            ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            # Seeders lead, resolution breaks the tie: an uncached candidate is
+            # worth nothing until it finishes downloading, so a well-seeded
+            # 1080p beats a 2160p with two peers. (Cached candidates never reach
+            # this branch — Pass 1 already served them — so this ordering cannot
+            # demote a ready-to-play copy.)
+            ranked.sort(key=lambda x: (x[1], x[0]), reverse=True)
 
             if not ranked:
                 log_service.info(
