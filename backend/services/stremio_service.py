@@ -508,8 +508,22 @@ class StremioService:
 
     @staticmethod
     def _normalise_text(text: str) -> str:
-        """Lowercase and collapse separators (whitespace, dots, underscores, dashes) to single spaces."""
-        return re.sub(r"[\s._\-]+", " ", text.lower()).strip()
+        """
+        Lowercase and collapse every run of punctuation/separators to one space.
+
+        This has to include punctuation, not just whitespace/dots/underscores/dashes.
+        Release names strip it but TMDB titles keep it, so with ':' surviving,
+        "Monster: The Lizzie Borden Story" yielded the word "monster:" which appears
+        in no filename on earth — _title_matches then failed for EVERY release of
+        every colon-titled show, and filter_streams_by_metadata fell back to the
+        unfiltered list, quietly dropping its wrong-show protection. Measured live:
+        4/4 and 10/10 rejected for this show, the only "matches" being Russian
+        releases that happened to reproduce the colon.
+
+        [\\W_] keeps unicode letters and digits, so a non-Latin title still yields
+        real words rather than collapsing to nothing and matching everything.
+        """
+        return re.sub(r"[\W_]+", " ", text.lower(), flags=re.UNICODE).strip()
 
     @staticmethod
     def _stream_text(stream: Dict) -> str:
