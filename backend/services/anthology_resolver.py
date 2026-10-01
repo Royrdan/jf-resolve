@@ -27,9 +27,17 @@ failure this is meant to prevent.
 Ties go to the lowest season, so an ordinary show settles on offset 0. If nothing
 matches anywhere, this returns None and the caller fails loudly rather than inventing
 a mapping.
+
+The probe is injected because it MUST be the same catalogue playback will use. Zilean
+is the primary source and searches by title+season+episode; the Stremio manifest is
+only a fallback and searches by imdb id. They disagree on how this show's releases
+are named, so measuring the wrong one picks the wrong season: measured live, Zilean
+offered 7 candidates for Lizzie Borden at season 4 and 3 at season 1, while Torrentio
+showed the opposite. Probing Torrentio and then playing through Zilean chose season 1
+and episode 3 resolved to a 404.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 import httpx
@@ -54,31 +62,41 @@ CONFIDENT_MATCHES = 3
 class AnthologyResolver:
     """Finds an IMDB series and the season offset for a TMDB show that has no id."""
 
-    def __init__(self, stremio: StremioService):
-        self.stremio = stremio
+    def __init__(self, probe: Callable, source_name: str = "provider"):
+        """
+        probe: async (imdb_id, title, season, episode) -> list of stream dicts.
+               Must query whatever catalogue playback will query, so the season it
+               measures is the season that will actually have files.
+        """
+        self.probe = probe
+        self.source_name = source_name
 
     async def resolve_series(
-        self, title: str, first_season: int = 1
+        self, title: str, first_season: int = 1, episode_count: int = 1
     ) -> Optional[Tuple[str, int]]:
         """
         Return (imdb_id, season_offset) for `title`, or None if nothing is provable.
 
-        season_offset is ADDED to TMDB season numbers to get the provider's season,
-        so Lizzie Borden (TMDB season 1 == IMDB season 4) yields an offset of 3.
+        season_offset is ADDED to TMDB season numbers to get the provider's season.
+        episode_count is the season's episode count, used to sample across it.
         """
         candidates = await self._imdb_candidates(title)
         if not candidates:
             log_service.warning(f"Anthology resolver: no IMDB series found for '{title}'")
             return None
 
+        episodes = self._sample_episodes(episode_count)
         for imdb_id, imdb_name in candidates:
-            measured = await self._best_season(imdb_id, title, first_season)
+            measured = await self._best_season(imdb_id, title, first_season, episodes)
             if measured is not None:
-                season, score = measured
+                season, score, covered = measured
                 offset = season - first_season
                 log_service.info(
                     f"Anthology resolver: '{title}' -> {imdb_id} season {season} "
-                    f"(offset {offset:+d}) on {score} strictly matching release(s)"
+                    f"(offset {offset:+d}) on {score} strictly matching release(s) "
+                    f"across episodes {episodes}"
+                    + ("" if covered else " — WARNING: not every sampled episode has "
+                                          "a match, some may not play")
                 )
                 return imdb_id, offset
 
@@ -137,47 +155,91 @@ class AnthologyResolver:
             return True  # unlabelled: let the provider probe decide
         return "series" in kind
 
-    async def _best_season(
-        self, imdb_id: str, title: str, first_season: int
-    ) -> Optional[Tuple[int, int]]:
+    @staticmethod
+    def _sample_episodes(episode_count: int) -> List[int]:
         """
-        (season, score) for the season hint with the most strictly matching releases,
-        or None if no hint produced a single one.
+        Up to three episodes spread across the season: first, middle, last.
 
-        Ascending with a strictly-greater comparison, so ties keep the lowest season
-        and an ordinary show lands on offset 0.
+        Episode 1 alone is not evidence. A newly released season is on every indexer
+        as episode 1 under every naming convention, while later episodes only appear
+        under the one the scene actually settled on. Measured live: Lizzie Borden
+        episode 1 had matches under both season hints, episode 3 only under one, and
+        episode-1-only measurement therefore chose the hint that 404s mid-season.
         """
-        best_season = None
-        best_score = 0
+        count = max(1, int(episode_count or 1))
+        return sorted({1, (count + 1) // 2, count})
+
+    async def _best_season(
+        self, imdb_id: str, title: str, first_season: int, episodes: List[int]
+    ) -> Optional[Tuple[int, int, bool]]:
+        """
+        (season, total_score, covered) for the best season hint, or None if no hint
+        matched anything at all.
+
+        `covered` means every sampled episode had at least one strict match. A hint
+        that covers the season always beats one that does not, however high the
+        latter's total — a season that plays throughout is worth more than one with a
+        large pile of candidates for its first episode and nothing for its third.
+        Among equals, highest total wins; ties keep the lowest season, so an ordinary
+        show lands on offset 0.
+        """
+        # Ranked on plausibly-English candidates, with the language-blind counts kept
+        # as a fallback so a non-English title still resolves rather than failing.
+        best_playable = None  # (covered, total, season)
+        best_any = None
         empty_run = 0
 
         for season in range(first_season, first_season + MAX_SEASONS):
-            try:
-                streams = await self.stremio.get_episode_streams(imdb_id, season, 1)
-            except Exception as e:
-                log_service.warning(
-                    f"Anthology resolver: provider lookup failed for "
-                    f"{imdb_id}:{season}:1: {e}"
+            playable, anylang = [], []
+            for episode in episodes:
+                try:
+                    streams = await self.probe(imdb_id, title, season, episode)
+                except Exception as e:
+                    log_service.warning(
+                        f"Anthology resolver: {self.source_name} lookup failed for "
+                        f"{imdb_id}:{season}:{episode}: {e}"
+                    )
+                    streams = []
+                anylang.append(
+                    StremioService.episode_match_count(streams, title, season, episode)
                 )
-                continue
+                playable.append(
+                    StremioService.episode_match_count(
+                        streams, title, season, episode, min_language_rank=2
+                    )
+                )
 
-            if not streams:
+            if not sum(anylang):
                 empty_run += 1
                 if empty_run >= MAX_EMPTY_SEASONS:
                     break  # past the end of the series
                 continue
             empty_run = 0
 
-            score = StremioService.episode_match_count(streams, title, season, 1)
+            covered = all(s > 0 for s in playable)
             log_service.info(
-                f"Anthology resolver: {imdb_id} season {season} -> {score} strict "
-                f"match(es) for '{title}'"
+                f"Anthology resolver: {self.source_name} {imdb_id} season {season} "
+                f"-> English-ish {playable}, any-language {anylang} for episodes "
+                f"{episodes} of '{title}'"
+                f"{' (every sampled episode playable)' if covered else ''}"
             )
-            if score > best_score:
-                best_season, best_score = season, score
-                if score >= CONFIDENT_MATCHES:
+
+            if best_any is None or (all(s > 0 for s in anylang), sum(anylang)) > (
+                best_any[0], best_any[1]
+            ):
+                best_any = (all(s > 0 for s in anylang), sum(anylang), season)
+
+            total = sum(playable)
+            if total and (
+                best_playable is None
+                or (covered, total) > (best_playable[0], best_playable[1])
+            ):
+                best_playable = (covered, total, season)
+                if covered and total >= CONFIDENT_MATCHES * len(episodes):
                     break  # plenty of evidence, stop spending provider requests
 
-        if best_season is None:
+        best = best_playable or best_any
+        if best is None:
             return None
-        return best_season, best_score
+        covered, total, season = best
+        return season, total, covered

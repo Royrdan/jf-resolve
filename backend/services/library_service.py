@@ -17,6 +17,7 @@ from .log_service import log_service
 from .settings_manager import SettingsManager
 from .stremio_service import StremioService
 from .tmdb_service import TMDBService
+from .zilean_service import ZileanService
 
 
 class LibraryService:
@@ -38,29 +39,62 @@ class LibraryService:
         """
         return season_num + (item.season_offset or 0)
 
-    async def _recover_imdb_id(self, title: str) -> Optional[tuple]:
+    async def _recover_imdb_id(
+        self, title: str, episode_count: int = 1
+    ) -> Optional[tuple]:
         """
         Find an IMDB id and season offset for a show TMDB has no id for.
 
         Returns (imdb_id, season_offset) or None. Never guesses the season — see
-        anthology_resolver for how the mapping is proved against release names.
+        anthology_resolver for how the mapping is measured.
+
+        The probe must mirror the resolve walk's catalogue order EXACTLY: Zilean
+        first, and Stremio only when Zilean returns nothing. That "only when"
+        matters more than it looks. Zilean searches by title+season, so for a show
+        whose releases are all named S01 it answers a season-1 query with a handful
+        of rows and answers season 4 with none. At season 1 those few rows suppress
+        the Stremio fallback entirely, so playback is stuck with them — measured
+        live, that is three foreign-dub candidates and a 404 on episode 3. At season
+        4 Zilean's silence lets Stremio supply seven English ones that play.
+        Measuring either source alone prefers season 1 and gets this backwards; only
+        the combination reproduces what playback will actually see.
         """
+        zilean_enabled = await self.settings.get("zilean_enabled", False)
+        zilean_url = await self.settings.get("zilean_url", "")
+        zilean = ZileanService(zilean_url) if (zilean_enabled and zilean_url) else None
+
         manifest_urls = await self.settings.get("stremio_manifest_urls", [])
         if isinstance(manifest_urls, str):
             manifest_urls = [manifest_urls] if manifest_urls else []
         if not manifest_urls:
             single = await self.settings.get("stremio_manifest_url")
             manifest_urls = [single] if single else []
-        if not manifest_urls:
+        stremio = StremioService(manifest_urls[0]) if manifest_urls else None
+
+        if zilean is None and stremio is None:
             log_service.error(
-                f"Cannot recover an IMDB id for '{title}': no Stremio manifest "
-                f"configured to check release names against"
+                f"Cannot recover an IMDB id for '{title}': neither Zilean nor a "
+                f"Stremio manifest is configured to check release names against"
             )
             return None
 
-        resolver = AnthologyResolver(StremioService(manifest_urls[0]))
+        async def probe(imdb_id, probe_title, season, episode):
+            if zilean is not None:
+                # Zilean searches by title, so imdb_id is not used for it.
+                streams = await zilean.get_episode_streams(probe_title, season, episode)
+                if streams:
+                    return streams
+            if stremio is not None:
+                return await stremio.get_episode_streams(imdb_id, season, episode)
+            return []
+
+        source_name = "+".join(
+            n for n, s in (("zilean", zilean), ("stremio", stremio)) if s is not None
+        )
+
+        resolver = AnthologyResolver(probe, source_name)
         try:
-            return await resolver.resolve_series(title)
+            return await resolver.resolve_series(title, episode_count=episode_count)
         except Exception as e:
             log_service.error(f"IMDB recovery failed for '{title}': {e}")
             return None
@@ -160,7 +194,9 @@ class LibraryService:
             # TMDB has no id — normal for anthologies it splits per season, and for
             # very new titles. Try to recover one (and the season it maps to) instead
             # of refusing the request outright. See anthology_resolver.
-            recovered = await self._recover_imdb_id(title)
+            recovered = await self._recover_imdb_id(
+                title, episode_count=total_episodes or 1
+            )
             if recovered:
                 imdb_id, season_offset = recovered
 

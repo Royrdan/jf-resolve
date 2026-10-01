@@ -685,7 +685,12 @@ class StremioService:
 
     @classmethod
     def episode_match_count(
-        cls, streams: List[Dict], title: str, season: int, episode: int
+        cls,
+        streams: List[Dict],
+        title: str,
+        season: int,
+        episode: int,
+        min_language_rank: int = 0,
     ) -> int:
         """
         How many streams strictly identify BOTH this title and this episode.
@@ -694,6 +699,13 @@ class StremioService:
         the full list. A caller comparing candidates has to be able to see a real
         zero — with the soft fallback, "nothing matched" and "everything matched"
         are indistinguishable by length.
+
+        min_language_rank filters by _language_rank, because "has candidates" and
+        "has candidates that will play" are different questions. Measured live:
+        episode 3 of this show had three strictly matching candidates under one
+        season hint and still resolved to a 404, because all three were foreign dubs
+        the audio validation then rejected. Pass 2 to count only plausibly-English
+        releases (English-only or unmarked).
         """
         if not streams or not title:
             return 0
@@ -706,6 +718,8 @@ class StremioService:
                 cls._episode_marker_matches(text, season, episode)
                 or cls._season_pack_matches(text, season)
             ):
+                continue
+            if min_language_rank and _language_rank(stream) < min_language_rank:
                 continue
             hits += 1
         return hits
