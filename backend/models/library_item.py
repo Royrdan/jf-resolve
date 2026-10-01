@@ -27,6 +27,15 @@ class LibraryItem(Base):
     last_season_checked = Column(Integer, default=0)
     last_episode_checked = Column(Integer, default=0)
 
+    # Added to TMDB season numbers to get the season hint the PROVIDER answers best
+    # under. Normally 0, and 0 is also right for most anthologies that TMDB splits
+    # into one show per season (Netflix's Monster): release groups number each one
+    # S01, so the provider's season 1 is where their files actually turn up, even
+    # though IMDB files them as seasons 1-4 of a single series. Set from measurement,
+    # never assumption — see anthology_resolver. Folder and file names always keep
+    # the TMDB number so Jellyfin still matches the metadata.
+    season_offset = Column(Integer, default=0)
+
     # STRM file tracking
     folder_path = Column(Text, nullable=False)
     quality_versions = Column(Text)  # JSON array: ["1080p", "4k"]

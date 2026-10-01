@@ -100,3 +100,30 @@ async def init_db():
             Base.metadata.create_all(connection, checkfirst=True)
 
         await conn.run_sync(create_tables)
+        await conn.run_sync(_add_missing_columns)
+
+
+# Columns added to tables that already exist in the wild. create_all() only ever
+# CREATEs, it never ALTERs, so a new Column on an existing model is invisible to
+# every database that was created before it — queries then fail with "no such
+# column". Keep this append-only: (table, column, DDL type + default).
+_ADDED_COLUMNS = [
+    ("library_items", "season_offset", "INTEGER DEFAULT 0"),
+]
+
+
+def _add_missing_columns(connection):
+    """Apply _ADDED_COLUMNS to tables that predate them. Idempotent."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(connection)
+    tables = set(inspector.get_table_names())
+
+    for table, column, ddl in _ADDED_COLUMNS:
+        if table not in tables:
+            continue  # create_all just made it, so the column is already there
+        existing = {c["name"] for c in inspector.get_columns(table)}
+        if column in existing:
+            continue
+        connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+        print(f"Database: added column {table}.{column}")

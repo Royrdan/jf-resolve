@@ -669,6 +669,33 @@ class StremioService:
 
         return matched
 
+    @classmethod
+    def episode_match_count(
+        cls, streams: List[Dict], title: str, season: int, episode: int
+    ) -> int:
+        """
+        How many streams strictly identify BOTH this title and this episode.
+
+        Same predicate filter_streams_by_metadata uses, but it never falls back to
+        the full list. A caller comparing candidates has to be able to see a real
+        zero — with the soft fallback, "nothing matched" and "everything matched"
+        are indistinguishable by length.
+        """
+        if not streams or not title:
+            return 0
+        hits = 0
+        for stream in streams:
+            text = cls._stream_text(stream)
+            if not cls._title_matches(text, title):
+                continue
+            if not (
+                cls._episode_marker_matches(text, season, episode)
+                or cls._season_pack_matches(text, season)
+            ):
+                continue
+            hits += 1
+        return hits
+
     @staticmethod
     def detect_quality(stream: Dict) -> str:
         """

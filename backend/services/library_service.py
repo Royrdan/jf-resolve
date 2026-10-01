@@ -12,8 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.library_item import LibraryItem
+from .anthology_resolver import AnthologyResolver
 from .log_service import log_service
 from .settings_manager import SettingsManager
+from .stremio_service import StremioService
 from .tmdb_service import TMDBService
 
 
@@ -24,6 +26,44 @@ class LibraryService:
         self.db = db
         self.tmdb = tmdb
         self.settings = settings
+
+    @staticmethod
+    def _provider_season(item: LibraryItem, season_num: int) -> int:
+        """
+        Season number to put in a STRM url, i.e. the one the PROVIDER indexes under.
+
+        Equals the TMDB season for everything normal (offset 0). Folder and file
+        names must keep using the TMDB number so Jellyfin still matches metadata —
+        only the url is shifted.
+        """
+        return season_num + (item.season_offset or 0)
+
+    async def _recover_imdb_id(self, title: str) -> Optional[tuple]:
+        """
+        Find an IMDB id and season offset for a show TMDB has no id for.
+
+        Returns (imdb_id, season_offset) or None. Never guesses the season — see
+        anthology_resolver for how the mapping is proved against release names.
+        """
+        manifest_urls = await self.settings.get("stremio_manifest_urls", [])
+        if isinstance(manifest_urls, str):
+            manifest_urls = [manifest_urls] if manifest_urls else []
+        if not manifest_urls:
+            single = await self.settings.get("stremio_manifest_url")
+            manifest_urls = [single] if single else []
+        if not manifest_urls:
+            log_service.error(
+                f"Cannot recover an IMDB id for '{title}': no Stremio manifest "
+                f"configured to check release names against"
+            )
+            return None
+
+        resolver = AnthologyResolver(StremioService(manifest_urls[0]))
+        try:
+            return await resolver.resolve_series(title)
+        except Exception as e:
+            log_service.error(f"IMDB recovery failed for '{title}': {e}")
+            return None
 
     async def _get_stream_server_url(self) -> str:
         """
@@ -114,10 +154,24 @@ class LibraryService:
 
         # Get IMDB ID
         imdb_id = await self.tmdb.get_imdb_id(tmdb_id, media_type)
+        season_offset = 0
+
+        if not imdb_id and media_type == "tv":
+            # TMDB has no id — normal for anthologies it splits per season, and for
+            # very new titles. Try to recover one (and the season it maps to) instead
+            # of refusing the request outright. See anthology_resolver.
+            recovered = await self._recover_imdb_id(title)
+            if recovered:
+                imdb_id, season_offset = recovered
 
         if not imdb_id:
-            log_service.error(f"No IMDB ID found for {media_type}:{tmdb_id}")
-            raise ValueError("IMDB ID not found - cannot create STRM files")
+            log_service.error(
+                f"No IMDB ID found for {media_type}:{tmdb_id} ({title})"
+            )
+            raise ValueError(
+                f"'{title}': TMDB has no IMDB id and no matching release was found "
+                f"- cannot create STRM files"
+            )
 
         is_anime = self.tmdb.is_anime(details)
         folder_path = await self._get_folder_path(media_type, is_anime, added_via)
@@ -136,6 +190,7 @@ class LibraryService:
             overview=details.get("overview"),
             total_seasons=total_seasons,
             total_episodes=total_episodes,
+            season_offset=season_offset,
             folder_path=str(full_path),
             quality_versions=json.dumps(quality_versions),
             added_by_user_id=user_id,
@@ -402,7 +457,8 @@ class LibraryService:
                         filename = f"{clean_title}{year_part} - {ep_tag}{version_label}.strm"
                         strm_path = season_folder / filename
 
-                        base_url = f"{server_url}/api/stream/resolve/tv/{item.tmdb_id}?season={season_num}&episode={episode_num}&quality={quality}&index={i}"
+                        url_season = self._provider_season(item, season_num)
+                        base_url = f"{server_url}/api/stream/resolve/tv/{item.tmdb_id}?season={url_season}&episode={episode_num}&quality={quality}&index={i}"
                         stream_url = (
                             f"{base_url}&imdb_id={item.imdb_id}"
                             if item.imdb_id
@@ -438,6 +494,7 @@ class LibraryService:
             "media_type": "tv",
             "title": item.title,
             "year": item.year,
+            "season_offset": item.season_offset or 0,
             "total_seasons": num_seasons,
             "quality_versions": qualities,
             "created_at": item.created_at.isoformat() if item.created_at else None,
@@ -680,7 +737,8 @@ class LibraryService:
                             strm_path = season_folder / filename
 
                             if not await asyncio.to_thread(strm_path.exists):
-                                base_url = f"{server_url}/api/stream/resolve/tv/{item.tmdb_id}?season={season_num}&episode={episode_num}&quality={quality}&index={i}"
+                                url_season = self._provider_season(item, season_num)
+                                base_url = f"{server_url}/api/stream/resolve/tv/{item.tmdb_id}?season={url_season}&episode={episode_num}&quality={quality}&index={i}"
                                 stream_url = (
                                     f"{base_url}&imdb_id={item.imdb_id}"
                                     if item.imdb_id
