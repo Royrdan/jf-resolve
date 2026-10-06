@@ -37,6 +37,7 @@ from ..services.stream_validator import (
 from ..services.stremio_service import StremioService, CAM_PATTERN
 from ..services.tmdb_service import TMDBService
 from ..services import tracker_scrape
+from ..services.stremthru_service import StremThruService
 from ..services.zilean_service import ZileanService
 
 router = APIRouter(prefix="/api/stream", tags=["stream"])
@@ -283,6 +284,7 @@ async def provider_health(
     out = {
         "provider": None,
         "debrid": {"status": "unknown", "message": ""},
+        "stremthru": {"status": "unknown", "message": ""},
         "zilean": {"status": "unknown", "message": ""},
         "overall": "ok",
     }
@@ -314,6 +316,29 @@ async def provider_health(
     except Exception as e:
         out["debrid"] = {"status": "error", "message": type(e).__name__}
         out["overall"] = "degraded"
+
+    # StremThru indexer (best-effort; a candidate source, not fatal on its
+    # own). A 200 from the torznab caps endpoint = service up and answering.
+    try:
+        stremthru_url = await settings.get("stremthru_url", "")
+        if not stremthru_url:
+            out["stremthru"] = {"status": "not_configured", "message": "URL not set"}
+        else:
+            base = stremthru_url.strip().rstrip("/")
+            if base and not base.startswith(("http://", "https://")):
+                base = f"http://{base}"
+            async with httpx.AsyncClient() as client:
+                r = await client.get(f"{base}/v0/torznab/api?t=caps", timeout=4.0)
+            if r.status_code == 200:
+                out["stremthru"] = {"status": "ok", "message": "Connected"}
+            else:
+                out["stremthru"] = {"status": "error", "message": f"HTTP {r.status_code}"}
+                if out["overall"] == "ok":
+                    out["overall"] = "degraded"
+    except Exception as e:
+        out["stremthru"] = {"status": "error", "message": type(e).__name__}
+        if out["overall"] == "ok":
+            out["overall"] = "degraded"
 
     # Zilean indexer (best-effort; a candidate source, not fatal on its own).
     try:
@@ -400,9 +425,14 @@ async def resolve_stream(
     tmdb = None
     api_key = await settings.get("tmdb_api_key")
 
-    # Zilean is the primary self-hosted catalogue source (replaces public
-    # Torrentio, which 429-blocks us). Read here so the manifest-required check
-    # below can stand down when Zilean is providing the candidates.
+    # The self-hosted DMM catalogue is the primary candidate source (replaces
+    # public Torrentio, which 429-blocks us). StremThru supersedes Zilean
+    # (abandoned upstream, broken by the 2026-09-30 DMM format change); when
+    # both are enabled StremThru wins, Zilean stays as a flip-back rollback.
+    # Read here so the manifest-required check below can stand down when a
+    # catalogue is providing the candidates.
+    stremthru_enabled = await settings.get("stremthru_enabled", False)
+    stremthru_url = await settings.get("stremthru_url", "")
     zilean_enabled = await settings.get("zilean_enabled", False)
     zilean_url = await settings.get("zilean_url", "")
 
@@ -420,10 +450,13 @@ async def resolve_stream(
     if not manifest_urls:
         manifest_urls = []
 
-    # Stremio manifests are only mandatory when Zilean is NOT the source. With
-    # Zilean enabled, running with zero Stremio addons is a valid (and intended)
-    # configuration — Zilean is primary, Stremio is just an optional fallback.
-    if not manifest_urls and not (zilean_enabled and zilean_url):
+    # Stremio manifests are only mandatory when no self-hosted catalogue is
+    # the source. With StremThru or Zilean enabled, running with zero Stremio
+    # addons is a valid (and intended) configuration — the catalogue is
+    # primary, Stremio is just an optional fallback.
+    if not manifest_urls and not (
+        (stremthru_enabled and stremthru_url) or (zilean_enabled and zilean_url)
+    ):
         raise HTTPException(
             status_code=500, detail="No Stremio manifest URLs configured"
         )
@@ -756,11 +789,56 @@ async def resolve_stream(
         # defaults to "" when running Zilean-only with no addons configured.
         manifest_url = manifest_urls[0] if manifest_urls else ""
 
-        # --- Primary source: Zilean (self-hosted DMM catalogue) ---
+        # --- Primary source: StremThru (self-hosted DMM catalogue) ---
+        # Query by IMDb id (already resolved from TMDB above) — exact-id
+        # lookup, immune to the title-normalisation bugs Zilean had. Results
+        # are infohash-only and get resolved through the same cached-only
+        # TorBox path as any torrent-mode candidate.
+        if stremthru_enabled and stremthru_url:
+            resolve_progress.publish(
+                cache_key, "search", f"Searching StremThru for {label}…"
+            )
+            try:
+                stremthru = StremThruService(stremthru_url)
+                if imdb_id or media_title:
+                    if media_type == "movie":
+                        streams = await stremthru.get_movie_streams(
+                            imdb_id, title=media_title
+                        )
+                    else:
+                        streams = await stremthru.get_episode_streams(
+                            imdb_id, season, episode, title=media_title
+                        )
+                    if streams:
+                        log_service.info(
+                            f"StremThru: {len(streams)} candidate(s) for {state_key} "
+                            f"({imdb_id or media_title})"
+                        )
+                        resolve_progress.publish(
+                            cache_key,
+                            "search",
+                            f"StremThru found {len(streams)} source(s)",
+                            found=len(streams),
+                        )
+                    else:
+                        log_service.info(
+                            f"StremThru: no candidates for {state_key} — "
+                            f"falling back"
+                        )
+                else:
+                    log_service.info(
+                        f"StremThru: no IMDb id or title for "
+                        f"{media_type}/{tmdb_id}, skipping"
+                    )
+            except Exception as e:
+                log_service.error(
+                    f"StremThru query failed for {state_key}: {e} — falling back"
+                )
+
+        # --- Secondary source: Zilean (legacy DMM catalogue, rollback path) ---
         # Query by canonical TMDB title (Zilean has no imdb_id when import
-        # matching is off). Results are infohash-only and get resolved through
-        # the same cached-only TorBox path as any torrent-mode candidate.
-        if zilean_enabled and zilean_url:
+        # matching is off). Skipped once StremThru has produced candidates.
+        if not streams and zilean_enabled and zilean_url:
             resolve_progress.publish(
                 cache_key, "search", f"Searching Zilean for {label}…"
             )
