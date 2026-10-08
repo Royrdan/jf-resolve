@@ -75,6 +75,7 @@ class TMDBService:
         released_only: bool = True,
         english_only: bool = True,
         page: int = 1,
+        genres: Optional[str] = None,
     ) -> Dict:
         """
         Discover movies/TV available on specific streaming providers in a region
@@ -83,6 +84,8 @@ class TMDBService:
         released_only: movies must have a digital/physical release on/before today
         (excludes titles still only in cinemas / unreleased); TV must have aired.
         english_only: keep original-language English (excludes foreign + anime).
+        genres: raw TMDB with_genres expression, e.g. "10751|10762" for
+        Family-or-Kids. Pass None for the whole catalogue.
         """
         import datetime
 
@@ -95,6 +98,8 @@ class TMDBService:
         }
         if english_only:
             params["with_original_language"] = "en"
+        if genres:
+            params["with_genres"] = genres
         if released_only:
             today = datetime.date.today().isoformat()
             if media_type == "movie":

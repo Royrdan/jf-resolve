@@ -744,6 +744,174 @@
                                 />
                                 <span>Top Rated</span>
                             </label>
+                            <label
+                                class="cursor-pointer flex items-center gap-2"
+                            >
+                                <input
+                                    type="checkbox"
+                                    value="providers"
+                                    :checked="settings.populate_sources?.includes('providers')"
+                                    @change="toggleSource('providers')"
+                                    class="checkbox"
+                                />
+                                <span>Streaming Services</span>
+                            </label>
+                            <label
+                                class="cursor-pointer flex items-center gap-2"
+                            >
+                                <input
+                                    type="checkbox"
+                                    value="kids"
+                                    :checked="settings.populate_sources?.includes('kids')"
+                                    @change="toggleSource('kids')"
+                                    class="checkbox"
+                                />
+                                <span>Kids &amp; Family</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Streaming Services source -->
+                    <div
+                        x-show="settings.populate_sources?.includes('providers')"
+                        class="form-control p-3 rounded-lg bg-base-200 space-y-3"
+                    >
+                        <label class="label pb-0"
+                            ><span class="label-text font-semibold"
+                                >Streaming Services to Search</span
+                            ></label
+                        >
+                        <p class="text-xs opacity-70">
+                            Each service is searched on its own, then results
+                            are taken in turn from each one — so a smaller
+                            service still gets a share instead of being buried
+                            under the biggest Netflix and Prime titles.
+                        </p>
+                        <div class="flex flex-wrap gap-4">
+                            <template
+                                x-for="p in providerCatalogue"
+                                :key="'prov-' + p.id"
+                            >
+                                <label
+                                    class="cursor-pointer flex items-center gap-2"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        :checked="hasProvider('populate_providers', p.id)"
+                                        @change="toggleProvider('populate_providers', p.id)"
+                                        class="checkbox checkbox-sm"
+                                    />
+                                    <span x-text="p.name"></span>
+                                </label>
+                            </template>
+                        </div>
+                        <div class="form-control max-w-xs">
+                            <label class="label"
+                                ><span class="label-text"
+                                    >Search Depth (pages per service)</span
+                                ></label
+                            >
+                            <input
+                                type="number"
+                                min="1"
+                                max="500"
+                                x-model.number="settings.populate_provider_pages"
+                                class="input input-bordered input-sm"
+                            />
+                            <span class="text-xs opacity-70 mt-1"
+                                >20 titles per page. Searching stops early once
+                                enough new titles are found, so raising this
+                                only costs anything on nights when the top of a
+                                service is already in your library.</span
+                            >
+                        </div>
+                    </div>
+
+                    <!-- Kids & Family source -->
+                    <div
+                        x-show="settings.populate_sources?.includes('kids')"
+                        class="form-control p-3 rounded-lg bg-base-200 space-y-3"
+                    >
+                        <label class="label pb-0"
+                            ><span class="label-text font-semibold"
+                                >Kids &amp; Family Pass</span
+                            ></label
+                        >
+                        <p class="text-xs opacity-70">
+                            A separate search restricted to children's
+                            catalogues and family genres. It runs first and is
+                            guaranteed its own share of the nightly total, so
+                            kids' titles can't be crowded out.
+                        </p>
+                        <div class="flex flex-wrap gap-4">
+                            <template
+                                x-for="p in providerCatalogue"
+                                :key="'kids-' + p.id"
+                            >
+                                <label
+                                    class="cursor-pointer flex items-center gap-2"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        :checked="hasProvider('populate_kids_providers', p.id)"
+                                        @change="toggleProvider('populate_kids_providers', p.id)"
+                                        class="checkbox checkbox-sm"
+                                    />
+                                    <span x-text="p.name"></span>
+                                </label>
+                            </template>
+                        </div>
+                        <div class="flex flex-wrap gap-4">
+                            <div class="form-control max-w-xs">
+                                <label class="label"
+                                    ><span class="label-text"
+                                        >Titles Reserved per Run</span
+                                    ></label
+                                >
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max="500"
+                                    x-model.number="settings.populate_kids_limit"
+                                    class="input input-bordered input-sm"
+                                />
+                                <span class="text-xs opacity-70 mt-1"
+                                    >Taken out of the total below. 0 turns the
+                                    pass off.</span
+                                >
+                            </div>
+                            <div class="form-control max-w-xs">
+                                <label class="label"
+                                    ><span class="label-text"
+                                        >Search Depth (pages per service)</span
+                                    ></label
+                                >
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="500"
+                                    x-model.number="settings.populate_kids_pages"
+                                    class="input input-bordered input-sm"
+                                />
+                            </div>
+                        </div>
+                        <div class="form-control max-w-xs">
+                            <label class="label"
+                                ><span class="label-text"
+                                    >Genres to Allow</span
+                                ></label
+                            >
+                            <input
+                                type="text"
+                                x-model="settings.populate_kids_genres"
+                                class="input input-bordered input-sm"
+                            />
+                            <span class="text-xs opacity-70 mt-1"
+                                >TMDB genre numbers, separated by |. Default
+                                10751|10762 is Family or Kids. Adding 16
+                                (Animation) also pulls in adult cartoons like
+                                Family Guy, so it's left out on purpose.</span
+                            >
                         </div>
                     </div>
 
@@ -1391,6 +1559,19 @@
             restarting: false,
             populating: false,
             updatingSeries: false,
+            // TMDB watch-provider ids for the AU services.
+            providerCatalogue: [
+                { id: 8, name: "Netflix" },
+                { id: 21, name: "Stan" },
+                { id: 337, name: "Disney+" },
+                { id: 119, name: "Prime Video" },
+                { id: 350, name: "Apple TV+" },
+                { id: 531, name: "Paramount+" },
+                { id: 385, name: "BINGE" },
+                { id: 1899, name: "HBO Max" },
+                { id: 134, name: "Foxtel Now" },
+                { id: 175, name: "Netflix Kids" },
+            ],
             modal: {
                 isOpen: false,
                 type: "alert",
@@ -1492,6 +1673,26 @@
                     this.settings.populate_frequency = "daily";
                 if (!this.settings.populate_limit)
                     this.settings.populate_limit = 5;
+                if (!Array.isArray(this.settings.populate_providers)) {
+                    this.settings.populate_providers = [
+                        8, 21, 337, 119, 350, 531, 385,
+                    ];
+                }
+                if (!this.settings.populate_provider_pages)
+                    this.settings.populate_provider_pages = 10;
+                if (!this.settings.populate_watch_region)
+                    this.settings.populate_watch_region = "AU";
+                if (this.settings.populate_english_only === undefined)
+                    this.settings.populate_english_only = true;
+                if (!Array.isArray(this.settings.populate_kids_providers)) {
+                    this.settings.populate_kids_providers = [337, 175];
+                }
+                if (!this.settings.populate_kids_genres)
+                    this.settings.populate_kids_genres = "10751|10762";
+                if (this.settings.populate_kids_limit === undefined)
+                    this.settings.populate_kids_limit = 20;
+                if (!this.settings.populate_kids_pages)
+                    this.settings.populate_kids_pages = 10;
                 if (this.settings.populate_excluded_ids === undefined)
                     this.settings.populate_excluded_ids = "";
                 if (
@@ -1537,6 +1738,22 @@
                     this.settings.populate_sources.splice(index, 1);
                 } else {
                     this.settings.populate_sources.push(source);
+                }
+            },
+
+            // Provider id lists are stored as arrays of numbers, which x-model
+            // can't bind to a checkbox, so they're toggled by hand.
+            hasProvider(key, id) {
+                return (this.settings[key] || []).includes(id);
+            },
+
+            toggleProvider(key, id) {
+                if (!Array.isArray(this.settings[key])) this.settings[key] = [];
+                const index = this.settings[key].indexOf(id);
+                if (index > -1) {
+                    this.settings[key].splice(index, 1);
+                } else {
+                    this.settings[key].push(id);
                 }
             },
 
