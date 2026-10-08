@@ -373,7 +373,10 @@
                         <span class="label-text-alt">
                             <p>
                                 Automatically trigger Jellyfin to scan library
-                                after adding content.
+                                after adding content. Leave this OFF — this
+                                setup relies on Jellyfin's real-time folder
+                                watching (inotify), which picks new files up on
+                                its own within seconds.
                             </p>
                         </span>
                     </label>
@@ -399,7 +402,10 @@
                             <strong>Warning:</strong> Frequent scans can slow
                             down the server or potentially cause database issues
                             if many items (especially series) are added in rapid
-                            succession. Enable with caution.
+                            succession. A full scan also makes Jellyfin
+                            <em>stop</em> watching folders for the whole time it
+                            runs, so nothing new appears until it finishes
+                            (hours on this library). Enable with caution.
                         </span>
                     </div>
 
