@@ -674,9 +674,22 @@ class StremioService:
             )
 
         if not matched:
+            if is_episode:
+                # Never soft-fall back on a season/episode mismatch. A movie
+                # whose year won't parse is a filter limitation; a wrong season
+                # is a wrong show. Returning the full list here served SNL
+                # S39E01 (2013) for every S52 request for two days — and it
+                # sailed through validation, because it IS a real episode of the
+                # right series, just the wrong one. Nothing downstream can catch
+                # that. Zero has to stay zero so the caller can 404 honestly.
+                log_service.warning(
+                    f"Stream metadata filter: no streams matched title='{title}'"
+                    f" S{season:02d}E{episode:02d} — refusing to fall back to "
+                    f"the unfiltered list (wrong-season sources are not servable)"
+                )
+                return []
             log_service.warning(
                 f"Stream metadata filter: no streams matched title='{title}'"
-                + (f" S{season:02d}E{episode:02d}" if is_episode else "")
                 + ". Falling back to unfiltered list."
             )
             return streams

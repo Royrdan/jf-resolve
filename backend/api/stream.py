@@ -809,6 +809,29 @@ async def resolve_stream(
                         streams = await stremthru.get_episode_streams(
                             imdb_id, season, episode, title=media_title
                         )
+                        # StremThru's torznab endpoint accepts season/ep params
+                        # but does NOT guarantee the season you asked for. SNL
+                        # S52 came back as 37 rows of S39-S50: 1480 of its 1489
+                        # SNL torrents are mapped to tt1372614, a *different*
+                        # 2009 series of the same name, leaving only old dregs
+                        # on the real tt0072562. Rows that contain no trace of
+                        # the requested episode are worse than no rows at all —
+                        # every fallback below is gated on `not streams`, so they
+                        # silence Zilean and Torrentio, which both had S52.
+                        # episode_match_count is the strict predicate (it never
+                        # soft-falls back), so a zero here is a real zero.
+                        if streams and media_title:
+                            usable = StremioService.episode_match_count(
+                                streams, media_title, season, episode
+                            )
+                            if not usable:
+                                log_service.warning(
+                                    f"StremThru: {len(streams)} candidate(s) for "
+                                    f"{state_key} but none identify "
+                                    f"S{season:02d}E{episode:02d} — discarding "
+                                    f"and falling back to the other sources"
+                                )
+                                streams = []
                     if streams:
                         log_service.info(
                             f"StremThru: {len(streams)} candidate(s) for {state_key} "
@@ -925,6 +948,20 @@ async def resolve_stream(
                 season=season if media_type == "tv" else None,
                 episode=episode if media_type == "tv" else None,
             )
+            # The filter now returns [] for a TV season/episode mismatch instead
+            # of silently handing back the unfiltered list. Catch that here: with
+            # no check, an empty list falls through to the block_cam branch below
+            # and surfaces as "Only cam-tier sources available", which sends the
+            # next person debugging this in entirely the wrong direction.
+            if not streams:
+                log_service.error(
+                    f"No source identifies {state_key} "
+                    f"('{media_title}') — every candidate was for other content"
+                )
+                raise HTTPException(
+                    status_code=404,
+                    detail="No source found for this episode",
+                )
 
         # Normalise TORRENT-MODE scraper results into synthetic candidate refs
         # so the rest of the pipeline is source-shape-agnostic. When a scraper is
