@@ -6,7 +6,7 @@ import re
 import time
 from dataclasses import replace as dc_replace
 from datetime import datetime
-from typing import Optional
+from typing import Dict, List, Optional
 from urllib.parse import quote, unquote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -157,6 +157,28 @@ def _synth_torrent_ref(infohash: str, file_idx, name: str) -> str:
     """
     idx = file_idx if file_idx is not None else ""
     return f"torrent://{infohash.lower()}/{idx}?name={quote(name or '')}"
+
+
+def _dedupe_candidates(streams: list) -> list:
+    """Merge per-source candidate lists, keeping the first copy of each torrent.
+
+    The same release reaches us from several catalogues (StremThru and Zilean
+    both index DebridMediaManager, so they share hashes outright), and probing
+    one twice just burns a slot in the walk budget. Identity is the infohash;
+    candidates that have neither an infoHash nor a url are pass-through, because
+    dropping something we cannot identify would make this a filter, and this is
+    a merge — the validator and denylists are the only gates.
+    """
+    seen = set()
+    out = []
+    for s in streams:
+        ident = (s.get("infoHash") or "").lower() or (s.get("url") or "")
+        if ident:
+            if ident in seen:
+                continue
+            seen.add(ident)
+        out.append(s)
+    return out
 
 
 def _parse_stream_ref(url: str):
@@ -435,6 +457,18 @@ async def resolve_stream(
     stremthru_url = await settings.get("stremthru_url", "")
     zilean_enabled = await settings.get("zilean_enabled", False)
     zilean_url = await settings.get("zilean_url", "")
+    # Retry StremThru by title when its by-id lookup finds nothing for the
+    # requested episode. Its imdb mapping collides on duplicate show titles
+    # ("Saturday Night Live" matches six IMDb series, all tvSeries, and the
+    # release names carry no year to break the tie), so the title search can
+    # reach rows the id search cannot. On by default; a switch because it costs
+    # a second StremThru round-trip on the miss path.
+    stremthru_title_fallback = await settings.get(
+        "stremthru_title_fallback_enabled", True
+    )
+    # Merge candidates from EVERY enabled source instead of stopping at the
+    # first one that answers. See the merge block below for why.
+    merge_sources = await settings.get("merge_candidate_sources", True)
 
     # Get manifest URLs (support both list and single legacy format)
     manifest_urls = await settings.get("stremio_manifest_urls")
@@ -816,14 +850,43 @@ async def resolve_stream(
                         # 2009 series of the same name, leaving only old dregs
                         # on the real tt0072562. Rows that contain no trace of
                         # the requested episode are worse than no rows at all —
-                        # every fallback below is gated on `not streams`, so they
-                        # silence Zilean and Torrentio, which both had S52.
+                        # they dilute the walk and (before the merge below) used
+                        # to silence the other sources entirely.
                         # episode_match_count is the strict predicate (it never
                         # soft-falls back), so a zero here is a real zero.
                         if streams and media_title:
                             usable = StremioService.episode_match_count(
                                 streams, media_title, season, episode
                             )
+                            # By-id found nothing for this episode. Retry by
+                            # TITLE: the torznab title search does not go through
+                            # the broken imdb mapping, so it reaches rows the id
+                            # lookup cannot see. Measured on SNL S52E01 at the
+                            # same instant: by-id 37 rows / 0 are S52, by-title
+                            # 38 rows / 1 is S52. Only swap in the title result
+                            # if it actually beats zero — an equally useless list
+                            # is not an improvement, just a different 37 rows.
+                            if not usable and imdb_id and stremthru_title_fallback:
+                                log_service.info(
+                                    f"StremThru: id lookup found no "
+                                    f"S{season:02d}E{episode:02d} for {state_key}"
+                                    f" — retrying by title '{media_title}'"
+                                )
+                                by_title = await stremthru.get_episode_streams(
+                                    None, season, episode, title=media_title
+                                )
+                                title_usable = StremioService.episode_match_count(
+                                    by_title, media_title, season, episode
+                                ) if by_title else 0
+                                if title_usable:
+                                    log_service.info(
+                                        f"StremThru: title lookup recovered "
+                                        f"{title_usable} match(es) of "
+                                        f"{len(by_title)} candidate(s) for "
+                                        f"{state_key} that the id lookup missed"
+                                    )
+                                    streams = by_title
+                                    usable = title_usable
                             if not usable:
                                 log_service.warning(
                                     f"StremThru: {len(streams)} candidate(s) for "
@@ -858,9 +921,29 @@ async def resolve_stream(
                     f"StremThru query failed for {state_key}: {e} — falling back"
                 )
 
+        # --- Candidate merge, part 1 of 3 ---
+        # First-source-wins was the deeper half of the SNL bug. Each source
+        # below is gated on `not streams`, so whichever one answered FIRST
+        # decided the entire candidate list — and "answered" only ever meant
+        # "returned rows", never "returned rows that play". Zilean answered
+        # S52E01 with 3 dead copies (all three `probe_failed`, even after a
+        # fresh TorBox load) and that was enough to skip Torrentio, which had
+        # 18 working cached copies of the same episode.
+        #
+        # So: collect from EVERY enabled source and let the measured rank key
+        # (§5 of the playbook) and the validator decide. This is not a latency
+        # trade — measured from CT104, Torrentio answers in 0.09-0.47s, the same
+        # ballpark as StremThru on the LAN — and the walk is already capped by
+        # stream_max_retries (8) and torbox_max_probes (40), so a longer list
+        # buys coverage, not probe volume.
+        collected: List[Dict] = []
+        if merge_sources:
+            collected.extend(streams)
+            streams = []
+
         # --- Secondary source: Zilean (legacy DMM catalogue, rollback path) ---
         # Query by canonical TMDB title (Zilean has no imdb_id when import
-        # matching is off). Skipped once StremThru has produced candidates.
+        # matching is off). Disabled 2026-10-09 (deprecated) but still wired.
         if not streams and zilean_enabled and zilean_url:
             resolve_progress.publish(
                 cache_key, "search", f"Searching Zilean for {label}…"
@@ -900,7 +983,12 @@ async def resolve_stream(
                     f"falling back to Stremio addons"
                 )
 
-        # --- Fallback source: Stremio addons (only when Zilean gave nothing) ---
+        # --- Candidate merge, part 2 of 3 ---
+        if merge_sources:
+            collected.extend(streams)
+            streams = []
+
+        # --- Stremio addons (Torrentio) ---
         # Try each manifest URL until we get streams
         for manifest_url in (manifest_urls if not streams else []):
             try:
@@ -929,12 +1017,30 @@ async def resolve_stream(
                 if stremio:
                     await stremio.close()
 
+        # --- Candidate merge, part 3 of 3 ---
+        if merge_sources:
+            collected.extend(streams)
+            before = len(collected)
+            streams = _dedupe_candidates(collected)
+            if streams:
+                log_service.info(
+                    f"Merged candidates for {state_key}: {len(streams)} unique "
+                    f"of {before} across all sources"
+                )
+                resolve_progress.publish(
+                    cache_key,
+                    "search",
+                    f"Found {len(streams)} source(s)",
+                    found=len(streams),
+                )
+
         if not streams:
             log_service.error(
-                f"All Stremio addons returned zero streams for {state_key} (IMDb: {imdb_id})"
+                f"Every configured source returned zero streams for {state_key} "
+                f"(IMDb: {imdb_id})"
             )
             raise HTTPException(
-                status_code=404, detail="No streams available from any configured addon"
+                status_code=404, detail="No streams available from any configured source"
             )
 
         # Drop streams whose title/filename clearly does not match the requested
