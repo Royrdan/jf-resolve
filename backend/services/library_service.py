@@ -772,6 +772,41 @@ class LibraryService:
                             filename = f"{clean_title}{year_part} - {ep_tag}{version_label}.strm"
                             strm_path = season_folder / filename
 
+                            # An episode's title can change after we first wrote its
+                            # STRM (TMDB fills a real name over a "Episode N"/"TBA"
+                            # placeholder once it airs, or tweaks capitalisation).
+                            # The title is part of the filename, so the exists()
+                            # check below would miss the old file and write a SECOND
+                            # one, leaving two cards for the same episode. Every file
+                            # for a slot resolves by episode NUMBER (title is cosmetic),
+                            # so before writing we drop any file for this exact slot
+                            # (same SxxExx + version label) whose only difference is
+                            # the title. Skip when version_label is empty: without a
+                            # label we cannot tell this slot's file apart from a
+                            # different-quality file of the same episode.
+                            if version_label:
+                                slot_prefix = (
+                                    f"{clean_title}{year_part} - "
+                                    f"S{season_num:02d}E{episode_num:02d} - "
+                                )
+                                slot_suffix = f"{version_label}.strm"
+
+                                def _find_stale():
+                                    return [
+                                        f
+                                        for f in season_folder.glob("*.strm")
+                                        if f.name != filename
+                                        and f.name.startswith(slot_prefix)
+                                        and f.name.endswith(slot_suffix)
+                                    ]
+
+                                for stale in await asyncio.to_thread(_find_stale):
+                                    await asyncio.to_thread(stale.unlink)
+                                    log_service.info(
+                                        f"Removed stale duplicate STRM {stale.name} "
+                                        f"(title now '{episode_title}')"
+                                    )
+
                             if not await asyncio.to_thread(strm_path.exists):
                                 url_season = self._provider_season(item, season_num)
                                 base_url = f"{server_url}/api/stream/resolve/tv/{item.tmdb_id}?season={url_season}&episode={episode_num}&quality={quality}&index={i}"
