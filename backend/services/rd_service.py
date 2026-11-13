@@ -284,6 +284,10 @@ class RDService:
             return 2.0
         if any(ind in f for ind in ["480p", "480"]):
             return 1.0
+        # Sub-480p (360p/240p/SD re-rips): rank BELOW 480p, not "unknown" (0),
+        # so the library quality floor rejects them and the walk finds a real copy.
+        if re.search(r"(?<![0-9])(360p?|240p?|144p?)(?![0-9])|[^a-z]sd[^a-z]|sdtv", f):
+            return 0.75
         return 0.0
 
     _EXTRAS_PATTERN = re.compile(
