@@ -62,6 +62,23 @@ def _norm_lang(lang: Optional[str]) -> str:
     return l
 
 
+def _stream_lang(stream: dict) -> str:
+    """Language of one ffprobe stream, read case-insensitively from its tags.
+
+    The track header's language arrives as `language`, but some muxers leave it
+    unset and put the language in a Matroska Tags element instead, which ffprobe
+    reports as `LANGUAGE`. Reading only the lowercase key saw those as untagged
+    (neutral) and let a Ukrainian-only Peppa Pig pack through as acceptable.
+    """
+    tags = stream.get("tags") or {}
+    values = [v for k, v in tags.items() if k.lower() == "language" and v]
+    # Prefer a specific language over a neutral one if the two places disagree.
+    specific = [_norm_lang(v) for v in values if _norm_lang(v) not in NEUTRAL_AUDIO_LANGS]
+    if specific:
+        return specific[0]
+    return _norm_lang(values[0]) if values else ""
+
+
 @dataclass
 class ProbeResult:
     """Outcome of validating a single stream URL."""
@@ -147,7 +164,9 @@ class StreamValidator:
             "-user_agent", "Mozilla/5.0 (jf-resolve)",
             "-show_entries",
             "format=format_name,duration:stream=codec_name,codec_type:"
-            "stream_tags=language,title:"
+            # All tags, not just language/title: the filter is case-sensitive, and
+            # some files only carry an uppercase LANGUAGE tag.
+            "stream_tags:"
             # Per-track default flag — players auto-select the default-flagged
             # audio track (or the first if none flagged). Used to reject a file
             # whose DEFAULT audio is a foreign dub even when English exists on a
@@ -232,8 +251,8 @@ class StreamValidator:
 
         audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
         sub_streams = [s for s in streams if s.get("codec_type") == "subtitle"]
-        audio_langs = [_norm_lang((s.get("tags") or {}).get("language")) for s in audio_streams]
-        sub_langs = [_norm_lang((s.get("tags") or {}).get("language")) for s in sub_streams]
+        audio_langs = [_stream_lang(s) for s in audio_streams]
+        sub_langs = [_stream_lang(s) for s in sub_streams]
 
         # Does the source carry at least one player-decodable audio track? A file
         # whose every audio stream is DTS/TrueHD plays silently on the internal
@@ -251,7 +270,7 @@ class StreamValidator:
             audio_streams[0] if audio_streams else None,
         )
         default_audio_lang = (
-            _norm_lang((default_audio.get("tags") or {}).get("language"))
+            _stream_lang(default_audio)
             if default_audio is not None
             else None
         )
