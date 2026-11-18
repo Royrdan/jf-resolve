@@ -28,6 +28,7 @@ import httpx
 
 from .log_service import log_service
 from .stream_validator import FOREIGN_DUB_RELEASE
+from .stremio_service import is_foreign_only_release
 from .rd_service import (
     RDService,
     _has_denied_video_codec,
@@ -511,6 +512,23 @@ class TorBoxService:
             matches.append((score, f.get("id"), name))
         return matches
 
+    @staticmethod
+    def _drop_foreign_packs(candidates: List[Dict], prefer_english: bool) -> List[Dict]:
+        """Skip library torrents whose NAME marks a foreign-only dub. The file
+        paths inside often carry no marker ("S05E09.Simple Science.SATRip.mkv")
+        and the audio may be untagged, so the torrent name is the only signal."""
+        if not prefer_english:
+            return candidates
+        kept = []
+        for t in candidates:
+            if is_foreign_only_release(t.get("name", "")):
+                log_service.info(
+                    f"TorBox: skipping foreign-dub library pack {t.get('name', '')!r}"
+                )
+                continue
+            kept.append(t)
+        return kept
+
     async def _resolve_from_matches(
         self,
         matches_by_torrent: List[tuple],
@@ -566,6 +584,7 @@ class TorBoxService:
             if self._title_matches(t.get("name", ""), title_words)
             and self._season_in_name(t.get("name", ""), season)
         ]
+        candidates = self._drop_foreign_packs(candidates, prefer_english)
         if not candidates:
             log_service.info(
                 f"TorBox: no library matches for '{show_title}' "
@@ -606,6 +625,7 @@ class TorBoxService:
             if self._title_matches(t.get("name", ""), title_words)
             and (not year or str(year) in RDService._normalise(t.get("name", "")))
         ]
+        candidates = self._drop_foreign_packs(candidates, prefer_english)
         if not candidates:
             log_service.info(
                 f"TorBox: no library matches for movie '{movie_title}' ({year})"

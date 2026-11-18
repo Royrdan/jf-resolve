@@ -279,6 +279,14 @@ def _language_rank(stream: Dict) -> int:
     return 2
 
 
+def is_foreign_only_release(name: str) -> bool:
+    """True when a release/torrent name marks a foreign dub with no English or
+    multi-audio marker. Such packs often ship audio with NO language tag at all
+    (the "Свинка Пеппа Peppa Pig [S05] SATRip | UKR" pack, 2026-11-18), which the
+    ffprobe gate treats as neutral and passes — so the name is the only signal."""
+    return _language_rank({"name": name or ""}) == 0
+
+
 class StremioService:
     """Stremio addon manifest integration"""
 
